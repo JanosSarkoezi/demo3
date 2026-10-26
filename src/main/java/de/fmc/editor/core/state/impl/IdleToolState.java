@@ -6,9 +6,26 @@ import de.fmc.editor.core.event.InputEvent;
 import de.fmc.editor.core.model.ToolType;
 import de.fmc.editor.core.state.rule.BaseState;
 
+import java.util.List;
+
 public final class IdleToolState extends BaseState {
 
     public IdleToolState() {
+        // 0. Doppelklick auf ein Objekt -> Auswahl + Resize-Modus (Handles).
+        //    Muss VOR der generischen Press-Regel registriert sein (Regel-Reihenfolge!).
+        addRule(InputEvent.MousePressed.class,
+                e -> e.button() == CustomMouseButton.PRIMARY && e.clickCount() == 2,
+                (e, c) -> {
+                    double worldX = c.camera().screenToWorldX(e.x());
+                    double worldY = c.camera().screenToWorldY(e.y());
+                    var target = c.diagram().findTopmostAt(worldX, worldY);
+                    if (target.isPresent()) {
+                        c.publisher().publish(new ActionEvent.SetSelection(List.of(target.get().id())));
+                        return new ResizeModeState(target.get());
+                    }
+                    return this;
+                });
+
         registerDefaultRules();
 
         // 1. Klick auf leere Fläche -> Vorbereitung für Panning (ohne Objekt-Erzeugung)

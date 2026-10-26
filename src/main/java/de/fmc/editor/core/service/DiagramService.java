@@ -56,6 +56,7 @@ public class DiagramService implements DiagramQuery {
         bus.subscribe(ActionEvent.AddElement.class, this::onAddElement);
         bus.subscribe(ActionEvent.MoveObject.class, this::onMoveObject);
         bus.subscribe(ActionEvent.ResizeObject.class, this::onResizeObject);
+        bus.subscribe(ActionEvent.ResizeCircle.class, this::onResizeCircle);
         bus.subscribe(ActionEvent.CreateConnection.class, this::onCreateConnection);
     }
 
@@ -81,10 +82,19 @@ public class DiagramService implements DiagramQuery {
             Rectangle resized = new Rectangle(rectangle.id(), rectangle.x(), rectangle.y(),
                     event.newWidth(), event.newHeight(), rectangle.layerId());
             objects.put(resized.id(), resized);
-            publishFact(new DiagramEvent.ObjectResizedApplied(
-                    resized.id(), resized.width(), resized.height()));
+            publishFact(new DiagramEvent.ObjectResizedApplied(resized));
         }
         // Kein Rectangle (oder unbekannte ID) => kein Fakt, nichts passiert.
+    }
+
+    private void onResizeCircle(ActionEvent.ResizeCircle event) {
+        if (objects.get(event.id()) instanceof Circle circle) {
+            Circle resized = new Circle(circle.id(), circle.x(), circle.y(),
+                    event.newRadius(), circle.layerId());
+            objects.put(resized.id(), resized);
+            publishFact(new DiagramEvent.ObjectResizedApplied(resized));
+        }
+        // Kein Circle (oder unbekannte ID) => kein Fakt, nichts passiert.
     }
 
     private void onCreateConnection(ActionEvent.CreateConnection event) {

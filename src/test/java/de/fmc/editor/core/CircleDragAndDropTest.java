@@ -7,7 +7,9 @@ import de.fmc.editor.core.event.InputEvent;
 import de.fmc.editor.core.model.Circle;
 import de.fmc.editor.core.model.DiagramObject;
 import de.fmc.editor.core.model.DiagramQuery;
+import de.fmc.editor.core.model.GridSpec;
 import de.fmc.editor.core.model.ToolType;
+import de.fmc.editor.core.service.SelectionService;
 import de.fmc.editor.core.state.CameraInfo;
 import de.fmc.editor.core.state.impl.IdleToolState;
 import de.fmc.editor.core.state.impl.MovingState;
@@ -55,7 +57,8 @@ class CircleDragAndDropTest {
         };
 
         CameraInfo cameraInfo = new CameraInfo(1.0, 0.0, 0.0, defaultLayerId);
-        eventBus = new InteractionEventBus(dynamicDiagram, cameraInfo);
+        eventBus = new InteractionEventBus(dynamicDiagram, cameraInfo,
+                new GridSpec(10.0), new SelectionService());
 
         // Aufzeichnen aller Objekt-Verschiebungs-Events
         eventBus.subscribe(ActionEvent.MoveObject.class, movedEvents::add);

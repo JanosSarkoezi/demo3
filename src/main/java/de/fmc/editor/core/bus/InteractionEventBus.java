@@ -4,6 +4,8 @@ import de.fmc.editor.core.event.ActionEvent;
 import de.fmc.editor.core.event.DomainEvent;
 import de.fmc.editor.core.event.InputEvent;
 import de.fmc.editor.core.model.DiagramQuery;
+import de.fmc.editor.core.model.GridSpec;
+import de.fmc.editor.core.model.SelectionQuery;
 import de.fmc.editor.core.state.CameraInfo;
 import de.fmc.editor.core.state.CameraState;
 import de.fmc.editor.core.state.InteractionContext;
@@ -24,13 +26,18 @@ public class InteractionEventBus implements EventBusPublisher {
     // Read-Only-Dependencies für den InteractionContext
     private final DiagramQuery diagramQuery;
     private final CameraInfo cameraInfo;
+    private final GridSpec gridSpec;
+    private final SelectionQuery selectionQuery;
 
     private final List<Consumer<DomainEvent>> subscribers = new CopyOnWriteArrayList<>();
 
     // Injektion der Read-Only-Schnittstellen beim Erstellen des Bus
-    public InteractionEventBus(DiagramQuery diagramQuery, CameraInfo cameraInfo) {
+    public InteractionEventBus(DiagramQuery diagramQuery, CameraInfo cameraInfo,
+                               GridSpec gridSpec, SelectionQuery selectionQuery) {
         this.diagramQuery = diagramQuery;
         this.cameraInfo = cameraInfo;
+        this.gridSpec = gridSpec;
+        this.selectionQuery = selectionQuery;
     }
 
     public <T extends DomainEvent> void subscribe(Class<T> eventType, Consumer<T> subscriber) {
@@ -44,7 +51,8 @@ public class InteractionEventBus implements EventBusPublisher {
     @Override
     public void publish(DomainEvent event) {
         // Frischen Context für diesen Event-Durchlauf bauen
-        InteractionContext context = new InteractionContext(this, diagramQuery, cameraInfo);
+        InteractionContext context = new InteractionContext(
+                this, diagramQuery, cameraInfo, gridSpec, selectionQuery);
 
         // 2. Kamera-Machine ZUERST verarbeiten
         // Reagiert auf InputEvents sowie Initiierungs-Events wie RequestCameraPan

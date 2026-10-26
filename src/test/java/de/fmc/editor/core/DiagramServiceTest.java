@@ -5,9 +5,11 @@ import de.fmc.editor.core.event.ActionEvent;
 import de.fmc.editor.core.event.DiagramEvent;
 import de.fmc.editor.core.model.Circle;
 import de.fmc.editor.core.model.Connection;
+import de.fmc.editor.core.model.GridSpec;
 import de.fmc.editor.core.model.Rectangle;
 import de.fmc.editor.core.model.Waypoint;
 import de.fmc.editor.core.service.DiagramService;
+import de.fmc.editor.core.service.SelectionService;
 import de.fmc.editor.core.state.CameraInfo;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -43,7 +45,8 @@ class DiagramServiceTest {
         defaultLayerId = UUID.randomUUID();
 
         diagram = new DiagramService();
-        bus = new InteractionEventBus(diagram, new CameraInfo(1.0, 0.0, 0.0, defaultLayerId));
+        bus = new InteractionEventBus(diagram, new CameraInfo(1.0, 0.0, 0.0, defaultLayerId),
+                new GridSpec(10.0), new SelectionService());
         diagram.attachTo(bus);
 
         bus.subscribe(DiagramEvent.ConnectionRejected.class, rejections::add);
@@ -109,9 +112,47 @@ class DiagramServiceTest {
                     assertThat(resized.id()).isEqualTo(rect.id());
                 });
         assertThat(resizedFacts).hasSize(1);
-        assertThat(resizedFacts.getFirst().id()).isEqualTo(rect.id());
-        assertThat(resizedFacts.getFirst().newWidth()).isEqualTo(80.0);
-        assertThat(resizedFacts.getFirst().newHeight()).isEqualTo(50.0);
+        assertThat(resizedFacts.getFirst().resizedObject())
+                .isInstanceOf(Rectangle.class)
+                .satisfies(obj -> {
+                    Rectangle resized = (Rectangle) obj;
+                    assertThat(resized.width()).isEqualTo(80.0);
+                    assertThat(resized.height()).isEqualTo(50.0);
+                    assertThat(resized.id()).isEqualTo(rect.id());
+                });
+    }
+
+    @Test
+    @DisplayName("ResizeCircle ändert den Radius, hält das Zentrum exakt und feuert den Fakt")
+    void shouldResizeCircle() {
+        Circle circle = newCircle(150.0, 200.0);
+        bus.publish(new ActionEvent.AddElement(circle));
+
+        bus.publish(new ActionEvent.ResizeCircle(circle.id(), 35.0));
+
+        assertThat(diagram.findById(circle.id()))
+                .hasValueSatisfying(obj -> {
+                    Circle resized = (Circle) obj;
+                    assertThat(resized.radius()).isEqualTo(35.0);
+                    // Das Zentrum bleibt exakt erhalten (symmetrisches Resize)
+                    assertThat(resized.x()).isEqualTo(150.0);
+                    assertThat(resized.y()).isEqualTo(200.0);
+                });
+        assertThat(resizedFacts).hasSize(1);
+        assertThat(resizedFacts.getFirst().resizedObject())
+                .isInstanceOf(Circle.class)
+                .satisfies(obj -> assertThat(((Circle) obj).radius()).isEqualTo(35.0));
+    }
+
+    @Test
+    @DisplayName("ResizeCircle auf ein Rectangle bleibt ohne Fakt")
+    void shouldNotResizeRectangleWithCircleRequest() {
+        Rectangle rect = new Rectangle(UUID.randomUUID(), 50.0, 60.0, 40.0, 30.0, defaultLayerId);
+        bus.publish(new ActionEvent.AddElement(rect));
+
+        bus.publish(new ActionEvent.ResizeCircle(rect.id(), 50.0));
+
+        assertThat(resizedFacts).isEmpty();
     }
 
     @Test

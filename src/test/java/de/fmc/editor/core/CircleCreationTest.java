@@ -7,7 +7,9 @@ import de.fmc.editor.core.event.InputEvent;
 import de.fmc.editor.core.model.Circle;
 import de.fmc.editor.core.model.DiagramObject;
 import de.fmc.editor.core.model.DiagramQuery;
+import de.fmc.editor.core.model.GridSpec;
 import de.fmc.editor.core.model.ToolType;
+import de.fmc.editor.core.service.SelectionService;
 import de.fmc.editor.core.state.CameraInfo;
 import de.fmc.editor.core.state.impl.CircleToolState;
 import org.junit.jupiter.api.BeforeEach;
@@ -48,7 +50,8 @@ class CircleCreationTest {
         // Kamera-Konfiguration ohne Zoom (1.0) und ohne Offset (0,0)
         CameraInfo cameraInfo = new CameraInfo(1.0, 0.0, 0.0, defaultLayerId);
 
-        eventBus = new InteractionEventBus(emptyDiagram, cameraInfo);
+        eventBus = new InteractionEventBus(emptyDiagram, cameraInfo,
+                new GridSpec(10.0), new SelectionService());
 
         // Event-Listener zur Aufzeichnung gefeuerter AddElement-Events
         eventBus.subscribe(ActionEvent.AddElement.class, createdEvents::add);
