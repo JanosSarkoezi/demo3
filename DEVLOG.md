@@ -86,3 +86,38 @@ Chronik der Arbeitssessions. Format: Datum / Was / Warum so / Grenzen & Verbesse
 - `mvn test`: 26/26 grün (DiagramServiceTest 9, ResizeModeStateTest 7,
   HandlePositionsTest 3, SelectionServiceTest 3, GridSpecTest 2,
   CircleCreationTest 1, CircleDragAndDropTest 1).
+
+## 26.10.2026 (3. Arbeitsblock) — Guard-Disjunktions-Invariante
+
+**Was:**
+
+- `BaseState.handleInput` erzwingt jetzt die Guard-Disjunktions-Invariante:
+  Greifen für ein (Event, Kontext)-Paar mehrere Guards, scheitert der
+  Dispatcher sofort mit `IllegalStateException` (State, Event, Trefferzahl).
+- Beide bestehenden Überlappungen beseitigt: `IdleToolState` (Doppelklick
+  `clickCount == 2` vs. einfacher Klick `clickCount == 1`; Dreifach-Klick
+  trifft bewusst keine Regel) und die drei Tool-States (Shortcut-Regeln jetzt
+  eine Guard-disjunkte Regel pro Key statt `default`-Switch, das ESC
+  überlappte).
+- Neuer `BaseStateTest` beweist die Invariante direkt: ambige Regeln werfen,
+  disjunkte dispatchen eindeutig, kein Treffer lässt den Zustand einfach.
+
+**Warum so:**
+
+- Ohne den Check könnte kein Test eine Überlappung sehen — der First-Match-
+  Dispatcher ließe die zweite Regel stillschweigend nie laufen. Mit dem Check
+  wird jeder bestehende und künftige Interaktions-Test gratis zum
+  Überlappungs-Detektor, und die Registrierungsreihenfolge trägt nie wieder
+  Verhalten. States bleiben deklarative Übergangstabellen, keine Programme
+  mit versteckter Priorität.
+- Konsequenz (in AGENTS.md dokumentiert): Guards müssen seiteneffektfrei
+  sein, da der Dispatcher jetzt alle auswertet.
+
+**Grenzen & Verbesserungskandidaten:**
+
+- Der Check ist ereignisbasiert: schlafende Überlappungen fallen erst auf,
+  wenn ein Test das auslösende Szenario tatsächlich durchfährt. Die Abdeckung
+  folgt der Konvention „ein Event-Test pro Feature" — bewusst gewählter
+  Pragmatismus statt Property-Based-Testing.
+- `mvn test`: 28/28 grün (alle bestehenden Interaktions-Tests bestätigten,
+  dass die Guard-Verschärfungen kein Verhalten geändert haben).

@@ -69,14 +69,38 @@ public abstract class BaseState implements InteractionState {
 
     // --- Die zentrale Dispatcher-Methode ---
 
+    /**
+     * Dispatcht das Event an die (per Invariante höchstens eine) passende Regel.
+     *
+     * Guard-Disjunktions-Invariante: Für jedes (Event, Kontext)-Paar darf
+     * höchstens EINE Regel greifen — andernfalls hinge das Verhalten an der
+     * Registrierungsreihenfolge und die zweite Regel liefe stillschweigend
+     * nie. Mehrfach-Treffern wird daher sofort mit einer aussagekräftigen
+     * IllegalStateException begegnet. Konsequenz: Guards müssen
+     * seiteneffektfrei sein, da hier alle ausgewertet werden.
+     */
     @Override
     public InteractionState handleInput(DomainEvent event, InteractionContext context) {
+        Rule<?> singleMatch = null;
+        int matchCount = 0;
+
         for (var rule : rules) {
             if (rule.matches(event, context)) {
-                return rule.execute(event, context);
+                matchCount++;
+                if (matchCount > 1) {
+                    throw new IllegalStateException(
+                            "Ambige Regeln in " + getClass().getSimpleName()
+                                    + " für " + event + ": "
+                                    + matchCount + " Guards greifen gleichzeitig");
+                }
+                singleMatch = rule;
             }
         }
+
         // Greift keine Regel, bleibt die State-Machine im aktuellen Zustand
-        return this;
+        if (singleMatch == null) {
+            return this;
+        }
+        return singleMatch.execute(event, context);
     }
 }

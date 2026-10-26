@@ -30,11 +30,13 @@ public final class CircleToolState extends BaseState {
             case SELECT, NONE -> new IdleToolState();
         });
 
-        // 4. Werkzeug-Wechsel über Keyboard-Shortcuts
-        addRule(InputEvent.KeyPressed.class, (e, c) -> switch (e.code()) {
-            case KEY_R -> new RectangleToolState();
-            case KEY_C -> new ConnectToolState();
-            default -> this;
-        });
+        // 4. Werkzeug-Wechsel über Shortcuts — eine Guard-disjunkte Regel pro
+        //    Key (kein default-Switch, der ESC/Vorhandenes überlappen könnte)
+        addRule(InputEvent.KeyPressed.class,
+                e -> e.code() == CustomKeyCode.KEY_R,
+                (e, c) -> new RectangleToolState());
+        addRule(InputEvent.KeyPressed.class,
+                e -> e.code() == CustomKeyCode.KEY_C,
+                (e, c) -> new ConnectToolState());
     }
 }

@@ -12,7 +12,7 @@ public final class IdleToolState extends BaseState {
 
     public IdleToolState() {
         // 0. Doppelklick auf ein Objekt -> Auswahl + Resize-Modus (Handles).
-        //    Muss VOR der generischen Press-Regel registriert sein (Regel-Reihenfolge!).
+        //    Guard-disjunkt zur einfachen Klick-Regel: clickCount 2 vs. 1.
         addRule(InputEvent.MousePressed.class,
                 e -> e.button() == CustomMouseButton.PRIMARY && e.clickCount() == 2,
                 (e, c) -> {
@@ -28,9 +28,11 @@ public final class IdleToolState extends BaseState {
 
         registerDefaultRules();
 
-        // 1. Klick auf leere Fläche -> Vorbereitung für Panning (ohne Objekt-Erzeugung)
+        // 1. Einfacher Klick -> Vorbereitung für Panning (ohne Objekt-Erzeugung).
+        //    clickCount == 1 hält die Regel Guard-disjunkt zur Doppelklick-Regel;
+        //    Dreifach-Klicks treffen bewusst KEINE Regel => Zustand bleibt.
         addRule(InputEvent.MousePressed.class,
-                e -> e.button() == CustomMouseButton.PRIMARY,
+                e -> e.button() == CustomMouseButton.PRIMARY && e.clickCount() == 1,
                 (e, c) -> {
                     double worldX = c.camera().screenToWorldX(e.x());
                     double worldY = c.camera().screenToWorldY(e.y());

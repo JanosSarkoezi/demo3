@@ -84,9 +84,21 @@ Der Bus ist die zentrale Schaltstelle (`implements EventBusPublisher`):
 Alle Tool-States erben von **`BaseState`** (`core.state.rule`) und registrieren
 im Konstruktor typsichere **Regeln**: `addRule(EventTyp, Guard, Action)` —
 Guard/Action erhalten Event **und** `InteractionContext`. `handleInput`
-dispatcht die erste passende Regel; greift keine, bleibt der Zustand erhalten.
+dispatcht die passende Regel; greift keine, bleibt der Zustand erhalten.
 **Neue Interaktionslogik gehört immer als Regel in einen State, nie als
 if-else-Kaskade.**
+
+**Guard-Disjunktions-Invariante:** Für jedes (Event, Kontext)-Paar darf
+höchstens EINE Regel eines States greifen — die Registrierungsreihenfolge darf
+niemals Verhalten tragen. `BaseState` erzwingt das: Mehrfach-Treffer scheitern
+sofort mit `IllegalStateException` (State, Event, Trefferzahl in der Meldung);
+ein `BaseStateTest` beweist die Invariante direkt. Konsequenzen:
+
+* Guards werden explizit vervollständigt statt auf Reihenfolge zu vertrauen
+  (z. B. Doppelklick `clickCount == 2` vs. einfacher Klick `clickCount == 1`;
+  pro Shortcut-Key genau eine Regel statt `default`-Switch).
+* Guards müssen seiteneffektfrei sein (der Dispatcher wertet alle aus).
+* Bewusste „keine-Regel-passt"-Reste sind erlaubt — der Zustand bleibt einfach.
 
 * **Tool-States** (`core.state.impl`): `IdleToolState` (Zoom, Tool-Wechsel,
   Shortcuts K/R/C, Hit-Test, Doppelklick → `ResizeModeState`),
