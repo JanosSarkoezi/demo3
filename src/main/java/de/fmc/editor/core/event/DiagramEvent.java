@@ -29,8 +29,10 @@ public sealed interface DiagramEvent extends DomainEvent {
 
     // --- Batch-Fakten einer Lösch-Geste (vollständiger Zustand für späteres Undo) ---
 
-    /** Alle entfernten Objekte (inkl. mitkaskadierter Waypoints). */
-    record ObjectsRemoved(List<DiagramObject> objects) implements DiagramEvent {}
+    /** Alle entfernten Objekte (inkl. mitkaskadierter Waypoints) mit ihren
+     *  z-Indizes zum Lösch-Zeitpunkt (objects und zIndices index-parallel) —
+     *  der vollständige Zustand macht den Fakt invertierbar (Undo-Regel). */
+    record ObjectsRemoved(List<DiagramObject> objects, List<Integer> zIndices) implements DiagramEvent {}
 
     /** Alle entfernten Connections mit vollständigem Zustand (Waypoint-IDs inklusive). */
     record ConnectionsRemoved(List<Connection> connections) implements DiagramEvent {}

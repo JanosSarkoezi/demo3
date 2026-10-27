@@ -11,6 +11,8 @@ import de.fmc.editor.core.model.Rectangle;
 import de.fmc.editor.core.model.Waypoint;
 
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -29,8 +31,17 @@ import java.util.UUID;
  */
 public class DiagramService implements DiagramQuery {
 
-    /** Einfüge-Reihenfolge des LinkedHashMap = z-Ordnung (zuletzt eingefügt = oben). */
-    private final LinkedHashMap<UUID, DiagramObject> objects = new LinkedHashMap<>();
+    /**
+     * Objekt-Store als Zwei-Struktur-Kombination:
+     * - HashMap für O(1)-Lookup per UUID,
+     * - zOrder (UUIDs, Index 0 = ganz unten) als EXPLIZITE z-Ordnung.
+     * Die Liste trägt nur IDs: Move/Resize berühren allein die Map; nur
+     * Hinzufügen/Entfernen synchronisieren beide Strukturen. Undo kann
+     * Objekte damit an ihrer ORIGINAL-Position wieder einfügen
+     * (ObjectsRemoved trägt die z-Indizes) statt oben aufzulegen.
+     */
+    private final Map<UUID, DiagramObject> objects = new HashMap<>();
+    private final List<UUID> zOrder = new ArrayList<>();
     private final Map<UUID, Connection> connections = new LinkedHashMap<>();
     private final List<ConnectionRule> connectionRules = new ArrayList<>();
 
@@ -59,6 +70,7 @@ public class DiagramService implements DiagramQuery {
         bus.subscribe(ActionEvent.ResizeCircle.class, this::onResizeCircle);
         bus.subscribe(ActionEvent.CreateConnection.class, this::onCreateConnection);
         bus.subscribe(ActionEvent.DeleteObjects.class, this::onDeleteObjects);
+        bus.subscribe(ActionEvent.RestoreObjects.class, this::onRestoreObjects);
         bus.subscribe(ActionEvent.MoveObjectTo.class, this::onMoveObjectTo);
         bus.subscribe(ActionEvent.AddConnection.class, this::onAddConnection);
         bus.subscribe(ActionEvent.RemoveConnections.class, this::onRemoveConnections);
@@ -67,8 +79,16 @@ public class DiagramService implements DiagramQuery {
     // ---------- Schreibpfad: ActionEvents (Requests) konsumieren ----------
 
     private void onAddElement(ActionEvent.AddElement event) {
-        objects.put(event.object().id(), event.object());
+        addToModel(event.object());
         publishFact(new DiagramEvent.ObjectAdded(event.object()));
+    }
+
+    /** Fügt oben in die z-Ordnung ein; bestehende IDs behalten ihre Position. */
+    private void addToModel(DiagramObject obj) {
+        objects.put(obj.id(), obj);
+        if (!zOrder.contains(obj.id())) {
+            zOrder.add(obj.id());
+        }
     }
 
     private void onMoveObject(ActionEvent.MoveObject event) {
@@ -139,7 +159,7 @@ public class DiagramService implements DiagramQuery {
         // damit die spätere UI sie über denselben Pfad rendert.
         List<UUID> waypointIds = new ArrayList<>();
         for (Waypoint waypoint : event.waypoints()) {
-            objects.put(waypoint.id(), waypoint);
+            addToModel(waypoint);
             waypointIds.add(waypoint.id());
             publishFact(new DiagramEvent.ObjectAdded(waypoint));
         }
@@ -161,73 +181,53 @@ public class DiagramService implements DiagramQuery {
      * Kaskade-Wissen (demo2-Lektion).
      */
     private void onDeleteObjects(ActionEvent.DeleteObjects event) {
-        List<DiagramObject> removedObjects = new ArrayList<>();
-        List<Connection> removedConnections = new ArrayList<>();
-        LinkedHashMap<UUID, Connection> updatedPrevious = new LinkedHashMap<>();
-        LinkedHashMap<UUID, Connection> updatedAfter = new LinkedHashMap<>();
-
+        // Phase 1 — Sammeln OHNE Mutation: alle betroffenen Objekte
+        // (Primär-IDs + kaskadierte Waypoints) und Connections bestimmen.
+        // putIfAbsent hält Geteilte (Waypoints mehrerer Connections) genau einmal.
+        LinkedHashMap<UUID, DiagramObject> doomedObjects = new LinkedHashMap<>();
+        LinkedHashMap<UUID, Connection> doomedConnections = new LinkedHashMap<>();
         for (UUID id : event.ids()) {
             DiagramObject obj = objects.get(id);
             if (obj == null) {
                 continue; // Unbekannte ID still ignorieren — kein Crash
             }
-
-            // K/R: angehängte Connections fallen mit in die Kaskade.
             if (!(obj instanceof Waypoint)) {
-                List<Connection> attached = connections.values().stream()
+                connections.values().stream()
                         .filter(conn -> id.equals(conn.sourceId()) || id.equals(conn.targetId()))
-                        .toList();
-                for (Connection conn : attached) {
-                    removeConnectionCascade(conn, removedObjects, removedConnections,
-                            updatedPrevious, updatedAfter);
-                }
+                        .forEach(conn -> collectConnectionCascade(conn, doomedObjects, doomedConnections));
             }
-            removeObjectCascade(obj, removedObjects, updatedPrevious, updatedAfter);
+            doomedObjects.putIfAbsent(obj.id(), obj);
+        }
+        if (doomedObjects.isEmpty()) {
+            return;
         }
 
-        if (!removedObjects.isEmpty()) {
-            publishFact(new DiagramEvent.ObjectsRemoved(List.copyOf(removedObjects)));
-        }
-        if (!updatedAfter.isEmpty()) {
-            publishFact(new DiagramEvent.ConnectionsUpdated(
-                    List.copyOf(updatedPrevious.values()), List.copyOf(updatedAfter.values())));
-        }
-        if (!removedConnections.isEmpty()) {
-            publishFact(new DiagramEvent.ConnectionsRemoved(List.copyOf(removedConnections)));
-        }
-    }
+        // Phase 2 — z-Indizes EINMAL vor der ersten Entfernung snapshoten:
+        // Frühere Entfernungen derselben Geste würden sonst die Indizes
+        // späterer Objekte verschieben. Aufsteigendes Wiedereinfügen nach
+        // Original-Index stellt die exakte Reihenfolge wieder her.
+        List<DiagramObject> removedObjects = new ArrayList<>(doomedObjects.values());
+        List<Integer> zIndices = removedObjects.stream()
+                .map(obj -> zOrder.indexOf(obj.id()))
+                .toList();
 
-    /** Entfernt eine Connection samt ihrer Waypoints und merkt alles für die Fakten vor. */
-    private void removeConnectionCascade(Connection conn, List<DiagramObject> removedObjects,
-                                         List<Connection> removedConnections,
-                                         LinkedHashMap<UUID, Connection> updatedPrevious,
-                                         LinkedHashMap<UUID, Connection> updatedAfter) {
-        if (connections.remove(conn.id()) == null) {
-            return; // Bereits in dieser Kaskade entfernt
+        // Phase 3 — aus beiden Strukturen entfernen.
+        for (DiagramObject obj : removedObjects) {
+            objects.remove(obj.id());
+            zOrder.remove(obj.id());
         }
-        removedConnections.add(conn);
-        for (UUID waypointId : conn.waypointIds()) {
-            DiagramObject waypoint = objects.get(waypointId);
-            if (waypoint != null) {
-                removeObjectCascade(waypoint, removedObjects, updatedPrevious, updatedAfter);
-            }
+        for (Connection conn : doomedConnections.values()) {
+            connections.remove(conn.id());
         }
-    }
 
-    /** Entfernt das Objekt und streicht seine ID aus allen Waypoint-Listen. */
-    private void removeObjectCascade(DiagramObject obj, List<DiagramObject> removedObjects,
-                                     LinkedHashMap<UUID, Connection> updatedPrevious,
-                                     LinkedHashMap<UUID, Connection> updatedAfter) {
-        if (objects.remove(obj.id()) == null) {
-            return; // Bereits in dieser Kaskade entfernt
-        }
-        removedObjects.add(obj);
-
+        // Phase 4 — IDs aus Waypoint-Listen überlebender Connections streichen.
+        LinkedHashMap<UUID, Connection> updatedPrevious = new LinkedHashMap<>();
+        LinkedHashMap<UUID, Connection> updatedAfter = new LinkedHashMap<>();
         for (Map.Entry<UUID, Connection> entry : connections.entrySet()) {
             Connection conn = entry.getValue();
-            if (conn.waypointIds().contains(obj.id())) {
+            if (doomedObjects.keySet().stream().anyMatch(conn.waypointIds()::contains)) {
                 List<UUID> prunedIds = new ArrayList<>(conn.waypointIds());
-                prunedIds.remove(obj.id());
+                prunedIds.removeAll(doomedObjects.keySet());
                 Connection pruned = new Connection(conn.id(), conn.sourceId(),
                         conn.targetId(), prunedIds, conn.layerId());
                 entry.setValue(pruned);
@@ -235,6 +235,56 @@ public class DiagramService implements DiagramQuery {
                 updatedPrevious.putIfAbsent(conn.id(), conn);
                 updatedAfter.put(pruned.id(), pruned);
             }
+        }
+
+        // Phase 5 — Fakten (vollständiger Zustand inkl. z-Indizes = Undo-Grundlage).
+        publishFact(new DiagramEvent.ObjectsRemoved(removedObjects, zIndices));
+        if (!updatedAfter.isEmpty()) {
+            publishFact(new DiagramEvent.ConnectionsUpdated(
+                    List.copyOf(updatedPrevious.values()), List.copyOf(updatedAfter.values())));
+        }
+        if (!doomedConnections.isEmpty()) {
+            publishFact(new DiagramEvent.ConnectionsRemoved(List.copyOf(doomedConnections.values())));
+        }
+    }
+
+    /** Sammelt eine Connection samt ihrer Waypoints für die Kaskade (ohne Mutation). */
+    private void collectConnectionCascade(Connection conn,
+                                          LinkedHashMap<UUID, DiagramObject> doomedObjects,
+                                          LinkedHashMap<UUID, Connection> doomedConnections) {
+        if (doomedConnections.putIfAbsent(conn.id(), conn) != null) {
+            return; // Bereits gesammelt
+        }
+        for (UUID waypointId : conn.waypointIds()) {
+            DiagramObject waypoint = objects.get(waypointId);
+            if (waypoint != null) {
+                doomedObjects.putIfAbsent(waypoint.id(), waypoint);
+            }
+        }
+    }
+
+    /**
+     * Undo-Inverse von ObjectsRemoved: fügt die Objekte an ihren originalen
+     * z-Positionen wieder ein — aufsteigend nach Original-Index, denn kleinere
+     * Indizes müssen zuerst wieder besetzt sein. Die LIFO-Disziplin des Undo
+     * macht die Indizes selbstheilend: jede spätere z-ändernde Geste ist
+     * bereits rückgängig, wenn dieser Restore läuft.
+     */
+    private void onRestoreObjects(ActionEvent.RestoreObjects event) {
+        int n = event.objects().size();
+        Integer[] ascending = new Integer[n];
+        for (int i = 0; i < n; i++) {
+            ascending[i] = i;
+        }
+        Arrays.sort(ascending, (a, b) -> Integer.compare(event.zIndices().get(a), event.zIndices().get(b)));
+
+        for (int pos : ascending) {
+            DiagramObject obj = event.objects().get(pos);
+            int insertAt = Math.min(event.zIndices().get(pos), zOrder.size());
+            zOrder.remove(obj.id()); // defensiv: falls vorhanden, Position erneuern
+            zOrder.add(insertAt, obj.id());
+            objects.put(obj.id(), obj);
+            publishFact(new DiagramEvent.ObjectAdded(obj));
         }
     }
 
@@ -262,13 +312,19 @@ public class DiagramService implements DiagramQuery {
 
     @Override
     public Optional<DiagramObject> findTopmostAt(double worldX, double worldY) {
-        // Rückwärts iterieren = oberstes Objekt zuerst.
+        // zOrder rückwärts = oberstes Objekt zuerst.
         // Waypoints sind keine Klick-Ziele (sonst trafe ein Klick beim
         // Verbindungsaufbau versehentlich einen vorhandenen Waypoint).
-        return objects.sequencedValues().reversed().stream()
-                .filter(obj -> !(obj instanceof Waypoint))
-                .filter(obj -> hit(obj, worldX, worldY))
-                .findFirst();
+        for (int i = zOrder.size() - 1; i >= 0; i--) {
+            DiagramObject obj = objects.get(zOrder.get(i));
+            if (obj == null || obj instanceof Waypoint) {
+                continue;
+            }
+            if (hit(obj, worldX, worldY)) {
+                return Optional.of(obj);
+            }
+        }
+        return Optional.empty();
     }
 
     @Override
@@ -283,6 +339,11 @@ public class DiagramService implements DiagramQuery {
     /** Unveränderliche Sicht auf alle Verbindungen (für UI und Tests). */
     public List<Connection> connections() {
         return List.copyOf(connections.values());
+    }
+
+    /** Unveränderliche Sicht auf die z-Ordnung (unten → oben) — für UI und Tests. */
+    public List<UUID> zOrderIds() {
+        return List.copyOf(zOrder);
     }
 
     // ---------- interne Helfer ----------

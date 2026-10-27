@@ -352,3 +352,46 @@ Chronik der Arbeitssessions. Format: Datum / Was / Warum so / Grenzen & Verbesse
   Move-Merging, Zwei-Gesten-Trennung, Kaskaden-Restore mit Original-IDs,
   VerbindungsWith- Waypoint-Undo, Resize-Undo, Redo-Invalidierung,
   Empty-History-No-Op).
+
+## 27.10.2026 (6. Arbeitsblock) — z-Ordnung als explizite Struktur (User-Idee)
+
+**Was:**
+
+- Objekt-Store umgebaut von LinkedHashMap (Einfüge-Reihenfolge = z-Ordnung)
+  zur Zwei-Struktur-Kombination (User-Vorschlag): `HashMap` für O(1)-Lookup
+  plus explizite `zOrder`-Liste (UUIDs, Index 0 = unten). Neue Objekte
+  landen oben; Move/Resize berühren allein die Map — nur Hinzufügen/
+  Entfernen synchronisieren beide Strukturen.
+- `ObjectsRemoved` trägt jetzt die z-Indizes zum Lösch-Zeitpunkt; neuer
+  Request `RestoreObjects` (Inverse des Löschens, fügt aufsteigend nach
+  Original-Index wieder ein). `DiagramService.zOrderIds()` exponiert die
+  Ordnung read-only (UI/Tests).
+- `onDeleteObjects` in Phasen zerlegt: Sammeln (ohne Mutation) → z-Index-
+  Snapshot → Entfernen → Waypoint-Listen-Strich → Fakten. Der Snapshot
+  MUSS vor der ersten Entfernung liegen, sonst verschieben frühere
+  Entfernungen der Geste die Indizes späterer Objekte.
+
+**Warum so:**
+
+- z-Ordnung ist Modellzustand: Ohne sie verletzte der Restore unsere eigene
+  Undo-Regel („Fakt trägt den vollständigen Vor-Zustand") — keine Kosmetik,
+  sondern eine Lücke.
+- Die Liste trägt UUIDs statt Records: Move/Resize (die häufigsten
+  Operationen) brauchen keine Synchronisation; die Sync-Bürde bleibt auf
+  zwei Stellen begrenzt.
+- Die aufgezeichneten Indizes sind unter Undo selbstheilend: LIFO poppt
+  jede spätere z-ändernde Geste zurück, bevor der Restore läuft — die
+  Indizes vom Lösch-Zeitpunkt sind dann wieder gültig.
+- Aufsteigendes Wiedereinfügen ist beweisbar exakt: kleinere Indizes sind
+  schon wieder besetzt, wenn die späteren folgen.
+
+**Grenzen & Verbesserungskandidaten:**
+
+- `zOrder.contains/indexOf` ist O(n) — bei Editor-Größenordnungen
+  (hunderte Objekte) irrelevant; eine Position-Map wäre vorsorgliches
+  Optimieren (bewusst NICHT eingebaut).
+- Explizite z-Manipulation („nach vorne/hinten") ist durch die Struktur
+  jetzt möglich, aber noch nicht als Request ausgeformt — kein Spec-Bedarf.
+- `mvn test`: 56/56 grün (53 + 3 `ZOrderRestoreTest`: Mittel-Position-
+  Restore inkl. Hit-Test-Beweis, Kaskaden-Restore mit Waypoint,
+  Multi-Delete mit Index-Snapshot).

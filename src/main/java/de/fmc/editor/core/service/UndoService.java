@@ -54,7 +54,7 @@ public class UndoService {
     private record AddedConnection(Connection connection) implements UndoOp {}
     private record MovedObject(UUID id, double oldX, double oldY, double newX, double newY) implements UndoOp {}
     private record ResizedObject(DiagramObject previous, DiagramObject resized) implements UndoOp {}
-    private record RemovedObjects(List<DiagramObject> objects) implements UndoOp {}
+    private record RemovedObjects(List<DiagramObject> objects, List<Integer> zIndices) implements UndoOp {}
     private record RemovedConnections(List<Connection> connections) implements UndoOp {}
     private record UpdatedConnections(List<Connection> previous, List<Connection> updated) implements UndoOp {}
 
@@ -81,7 +81,8 @@ public class UndoService {
                 fact -> record(new ResizedObject(fact.previous(), fact.resized())));
         bus.subscribe(DiagramEvent.ConnectionEstablished.class,
                 fact -> record(new AddedConnection(fact.connection())));
-        bus.subscribe(DiagramEvent.ObjectsRemoved.class, fact -> record(new RemovedObjects(fact.objects())));
+        bus.subscribe(DiagramEvent.ObjectsRemoved.class,
+                fact -> record(new RemovedObjects(fact.objects(), fact.zIndices())));
         bus.subscribe(DiagramEvent.ConnectionsRemoved.class,
                 fact -> record(new RemovedConnections(fact.connections())));
         bus.subscribe(DiagramEvent.ConnectionsUpdated.class,
@@ -180,8 +181,8 @@ public class UndoService {
                     new ActionEvent.RemoveConnections(List.of(added.connection().id())));
             case MovedObject move -> bus.publish(new ActionEvent.MoveObjectTo(move.id(), move.oldX(), move.oldY()));
             case ResizedObject resize -> bus.publish(resizeRequest(resize.previous()));
-            case RemovedObjects removed -> removed.objects().forEach(
-                    obj -> bus.publish(new ActionEvent.AddElement(obj)));
+            case RemovedObjects removed -> bus.publish(
+                    new ActionEvent.RestoreObjects(removed.objects(), removed.zIndices()));
             case RemovedConnections removed -> removed.connections().forEach(
                     conn -> bus.publish(new ActionEvent.AddConnection(conn)));
             case UpdatedConnections updated -> updated.previous().forEach(

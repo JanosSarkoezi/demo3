@@ -45,6 +45,11 @@ public sealed interface ActionEvent extends DomainEvent {
     record DeleteObjects(List<UUID> ids) implements ActionEvent {
     }
 
+    /** Undo-Inverse der Lösch-Kaskade: Objekte an ihren originalen
+     *  z-Positionen wiederherstellen (objects und zIndices index-parallel). */
+    record RestoreObjects(List<DiagramObject> objects, List<Integer> zIndices) implements ActionEvent {
+    }
+
     record MoveObject(UUID id, double deltaX, double deltaY) implements ActionEvent {
     }
 

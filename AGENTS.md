@@ -106,8 +106,14 @@ drei Zweigen:
   Vor-Zustand trägt.** Daran dockt die spätere UI an.
 
 ### 3. `DiagramService` — zentrale Datenhalterung (core.service)
-Der `DiagramService` besitzt die Objekte und Verbindungen (LinkedHashMap,
-Einfüge-Reihenfolge = z-Ordnung). **Der Event-Bus ist der einzige Schreibpfad:**
+Der `DiagramService` speichert Objekte als Zwei-Struktur-Kombination
+(User-Idee): `HashMap` für O(1)-Lookup per UUID plus explizite `zOrder`-Liste
+(UUIDs, Index 0 = unten). Nur Hinzufügen/Entfernen synchronisieren beide
+Strukturen — Move/Resize berühren allein die Map. `ObjectsRemoved` trägt die
+z-Indizes zum Lösch-Zeitpunkt (Snapshot VOR der ersten Entfernung der Geste);
+`RestoreObjects` fügt aufsteigend nach Original-Index wieder ein — die
+LIFO-Disziplin des Undo macht alte Indizes selbstheilend.
+**Der Event-Bus ist der einzige Schreibpfad:**
 keine öffentlichen Mutatoren. Er konsumiert `ActionEvent`s und veröffentlicht
 bestätigte Änderungen als `DiagramEvent`s. Verbindungen validiert er zentral
 über steckbare `ConnectionRule`s (Standardregel: gleicher Typ nicht verbindbar
@@ -253,8 +259,8 @@ Beim Umsetzen dieser Features die obigen Goldenen Regeln einhalten:
   semantisch wie Toolbar → `SelectTool`). Fakten-basiert statt
   Command-Klassen: Modell-Fakten tragen den Vor-Zustand, der Service leitet
   inverse Requests mechanisch ab; pro Geste genau ein History-Punkt.
-  Offen: z-Order beim Restore (Wiedereinfügen landet oben in der
-  Einfüge-Reihenfolge — Verbesserungsidee des Users ausstehend), UI-Anbindung.
+  z-Ordnung wird beim Restore exakt wiederhergestellt (zOrder-Liste +
+  Original-Indizes). Offen: UI-Anbindung.
 * **Layer-System:** Records haben bereits `layerId` und `CameraInfo` ein
   `defaultLayerId` — aber es gibt keine `Layer`-Objekte und keine
   Sichtbarkeitssteuerung. *(Bestätigt durch spec.md: Sichtbarkeits-Steuerung,
