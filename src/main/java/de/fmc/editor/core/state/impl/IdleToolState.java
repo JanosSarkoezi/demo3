@@ -7,7 +7,9 @@ import de.fmc.editor.core.event.InputEvent;
 import de.fmc.editor.core.model.ToolType;
 import de.fmc.editor.core.state.rule.BaseState;
 
+import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 
 public final class IdleToolState extends BaseState {
 
@@ -29,7 +31,7 @@ public final class IdleToolState extends BaseState {
 
         registerDefaultRules();
 
-        // 1. Einfacher Klick -> Vorbereitung für Panning (ohne Objekt-Erzeugung).
+        // 1. Einfacher Klick -> Selektion bei Maus-Druck + Geste vorbereiten.
         //    clickCount == 1 hält die Regel Guard-disjunkt zur Doppelklick-Regel;
         //    Dreifach-Klicks treffen bewusst KEINE Regel => Zustand bleibt.
         addRule(InputEvent.MousePressed.class,
@@ -40,12 +42,29 @@ public final class IdleToolState extends BaseState {
 
                     var target = c.diagram().findTopmostAt(worldX, worldY);
                     if (target.isEmpty()) {
-                        // Klick ins Leere -> Kann Drag/Pan werden (mit ToolType.SELECT)
+                        // Klick ins Leere -> Auswahl aufheben; kann Drag/Pan werden
+                        c.publisher().publish(new ActionEvent.SetSelection(List.of()));
                         return new PendingCreateOrPanState(e.x(), e.y(), ToolType.SELECT);
-                    } else {
-                        // Klick auf Objekt -> Verschieben vorbereiten
-                        return new PendingMoveState(target.get(), e.x(), e.y());
                     }
+
+                    // Selektion bei Maus-Druck: einfacher Klick = exklusiv,
+                    // Ctrl+Klick = Toggle (bereits Selektiertes fliegt raus).
+                    UUID targetId = target.get().id();
+                    List<UUID> current = c.selection().selectedIds();
+                    List<UUID> newSelection;
+                    if (e.controlDown()) {
+                        newSelection = new ArrayList<>(current);
+                        newSelection.remove(targetId); // No-Op, falls nicht enthalten
+                        if (!current.contains(targetId)) {
+                            newSelection.add(targetId);
+                        }
+                    } else {
+                        newSelection = List.of(targetId);
+                    }
+                    c.publisher().publish(new ActionEvent.SetSelection(newSelection));
+
+                    // Klick auf Objekt -> Verschieben vorbereiten
+                    return new PendingMoveState(target.get(), e.x(), e.y());
                 });
     }
 
@@ -77,5 +96,25 @@ public final class IdleToolState extends BaseState {
         addRule(InputEvent.KeyPressed.class,
                 e -> e.code() == CustomKeyCode.KEY_C,
                 (e, c) -> new ConnectToolState());
+
+        // ESC -> Auswahl aufheben (Zustand bleibt). Gefahrlos, da seit dem
+        // 27.10. alle KeyPressed-Regeln Guard-disjunkt sind.
+        addRule(InputEvent.KeyPressed.class,
+                e -> e.code() == CustomKeyCode.ESCAPE,
+                (e, c) -> {
+                    c.publisher().publish(new ActionEvent.SetSelection(List.of()));
+                    return this;
+                });
+
+        // DEL -> aktuelle Auswahl löschen. Guard: Auswahl nicht leer —
+        // sonst kein Lösch-Request und damit auch keine Fakten.
+        addRule(InputEvent.KeyPressed.class,
+                (e, c) -> e.code() == CustomKeyCode.DELETE
+                        && !c.selection().selectedIds().isEmpty(),
+                (e, c) -> {
+                    c.publisher().publish(
+                            new ActionEvent.DeleteObjects(c.selection().selectedIds()));
+                    return this;
+                });
     }
 }

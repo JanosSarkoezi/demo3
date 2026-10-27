@@ -8,5 +8,6 @@ public enum CustomKeyCode {
     KEY_C, // Connect-Tool
     KEY_K, // Circle-Tool
     KEY_R, // Rectangle-Tool
+    DELETE, // Löschen der aktuellen Auswahl
     UNKNOWN
 }

@@ -42,9 +42,9 @@ Die `spec.md` im `doc/`-Verzeichnis beschreibt die Zielversion des Editors. Kern
 
 * **Waypoint-Referenzierung per ID:** Waypoints sind eigenständige
   DiagramObjects (ID, Position, layerId); Connections referenzieren sie per
-  `waypointIds` — so hat es demo2 praktiziert. ⚠️ Ist-Zustand: `Connection`
-  bettet noch `List<Waypoint>`-Instanzen ein — bei Move eines W existieren
-  zwei Kopien. Migration auf ID-Referenzen geplant (spezifikationskonform).
+  `waypointIds` — so hat es demo2 praktiziert. ✅ Implementiert: Der
+  DiagramService speichert Waypoints beim `CreateConnection` als Objekte
+  (je ein `ObjectAdded`-Fakt); die Connection hält nur die IDs.
 * **Circle-Speicherung — typisiertes Modell behalten:** JSON nutzt
   width/height, weil demo2 EIN `FmcObject`-Record mit Bounding-Box für alle
   Typen nutzte. Empfehlung: Das sealed, typisierte Modell behalten
@@ -64,8 +64,10 @@ Die `spec.md` im `doc/`-Verzeichnis beschreibt die Zielversion des Editors. Kern
 * **Datenhaltung im `DiagramService`** (`core.service`): implementiert das
   **read-only Interface `DiagramQuery`** (`findTopmostAt`, `findById`) —
   Details siehe Abschnitt 3.
-* **`Connection`** (Record): Kante zwischen zwei DiagramObjects mit
-  Waypoint-Liste; bewusst kein `DiagramObject` (kein Klick-Ziel).
+* **`Connection`** (Record): Kante zwischen zwei DiagramObjects; referenziert
+  ihre Waypoints per `waypointIds` — die Waypoints liegen als eigenständige
+  Objekte im DiagramService (keine zweite Kopie). Bewusst kein `DiagramObject`
+  (kein Klick-Ziel).
 * **`CameraInfo`** (Record): zoom, offsetX/offsetY, defaultLayerId — inklusive
   `screenToWorldX/Y`-Umrechnung sowie `panBy`/`zoomAt` (reine
   Koordinaten-Mathematik; der Bus aktualisiert seinen Snapshot bei
@@ -77,20 +79,27 @@ Die gesamte Kommunikation läuft über das sealed Interface `DomainEvent` mit
 drei Zweigen:
 
 * **`InputEvent`** (rohe Eingaben): `MousePressed` (mit clickCount, 2 =
-  Doppelklick), `MouseDragged`, `MouseReleased`, `MouseScrolled`, `KeyPressed`,
+  Doppelklick, und `controlDown` für den Selektions-Toggle / späteres
+  Gummiband; public Kompatibilitäts-Konstruktor ohne Modifier-Info),
+  `MouseDragged`, `MouseReleased`, `MouseScrolled`, `KeyPressed`,
   `KeyReleased`. Verwendet die eigenen Enums `CustomMouseButton` /
   `CustomKeyCode` — **keine** JavaFX-Typen in Events.
 * **`ActionEvent`** (Absichten/Ergebnisse): `PanView`, `ZoomView`,
   `RequestCameraPan`, `SelectTool`, `SetSelection` (deklarative Auswahl-Menge,
-  leer = abwählen), `AddElement` (fertiges Record inkl. UUID), `MoveObject`
+  leer = abwählen), `AddElement` (fertiges Record inkl. UUID),
+  `DeleteObjects` (zentrales Löschen inkl. Kaskade), `MoveObject`
   (Delta in Welt-Koordinaten), `ResizeObject` / `ResizeCircle` (nur Maße —
   das Zentrum bleibt garantiert erhalten), `CreateConnection` (mit
-  Waypoint-Liste).
+  Waypoint-Liste — der Service speichert die Waypoints als Objekte und
+  referenziert sie per ID).
 * **`DiagramEvent`** (Fakten von Diagram- & SelectionService): Antwort auf
   Requests — `ObjectAdded`, `ObjectMovedApplied`, `ObjectResizedApplied`
   (trägt das geänderte Objekt), `ConnectionEstablished`,
-  `ConnectionRejected` (mit Begründung), `SelectionChanged`. Daran dockt die
-  spätere UI an.
+  `ConnectionRejected` (mit Begründung), `SelectionChanged`; plus
+  Batch-Fakten einer Lösch-Geste mit vollständigem Zustand (Undo-Grundlage):
+  `ObjectsRemoved` (inkl. kaskadierter Waypoints), `ConnectionsRemoved`,
+  `ConnectionsUpdated` (bestehen gebliebene mit gestrichenen Waypoint-Listen).
+  Daran dockt die spätere UI an.
 
 ### 3. `DiagramService` — zentrale Datenhalterung (core.service)
 Der `DiagramService` besitzt die Objekte und Verbindungen (LinkedHashMap,
@@ -107,6 +116,8 @@ Bus ↔ Service: `new DiagramService()` → `new InteractionEventBus(service, �
   Auswahl. Schreibpfad nur über `SetSelection`-Requests (leer = abwählen),
   Bestätigung als `SelectionChanged`-Fakt; read-only-Sicht: `SelectionQuery`
   (`core.model`). Auswahl ist Sitzungszustand, bewusst NICHT im DiagramService.
+  Invariante „keine toten IDs": Der Service abonniert `ObjectsRemoved` und
+  staubt gelöschte IDs automatisch heraus.
 * **`GridSpec`** (`core.model`, Record): Grid-Größe in Welt-Koordinaten;
   `snapToGrid(...)` rundet auf den nächsten Schnittpunkt. Heute Referenz für
   Minimalgrößen (kleinstes Objekt = 1 Zelle); Move-Snapping später.
@@ -152,7 +163,9 @@ ein `BaseStateTest` beweist die Invariante direkt. Konsequenzen:
 * Bewusste „keine-Regel-passt"-Reste sind erlaubt — der Zustand bleibt einfach.
 
 * **Tool-States** (`core.state.impl`): `IdleToolState` (Zoom, Tool-Wechsel,
-  Shortcuts K/R/C, Hit-Test, Doppelklick → `ResizeModeState`),
+  Shortcuts K/R/C, Hit-Test, Selektion bei Press — einfach = exklusiv,
+  Ctrl+Klick = Toggle, Leere/ESC = leeren —, DEL = Auswahl löschen,
+  Doppelklick → `ResizeModeState`),
   `CircleToolState` / `RectangleToolState` / `ConnectToolState`,
   `PendingCreateOrPanState` (Klick-oder-Drag-Entscheidung), `MovingState`,
   `PendingMoveState`, `ConnectingState` (Waypoints sammeln, ESC bricht ab),
@@ -244,10 +257,11 @@ Beim Umsetzen dieser Features die obigen Goldenen Regeln einhalten:
 * **Mehrfachauswahl:** Infrastruktur steht (`SelectionService`, `SetSelection`,
   `SelectionChanged`). Offen bleibt der plurale `MoveObjects`-Request.
   Resize-Handles sind nur bei genau einem ausgewählten Objekt sinnvoll.
-  *(Bestätigt durch spec.md; Mechanik gemäß demo2: Ctrl+Klick = Toggle,
-  Ctrl+Drag ins Leere = Gummiband, einfacher Klick = Einzel-Auswahl mit
-  Reset. Gummiband als eigener Pending-State, Ergebnis deklarativ als
-  `SetSelection`.)*
+  *(Selektion bei Maus-Druck ist implementiert: einfacher Klick = exklusiv,
+  Ctrl+Klick = Toggle (`controlDown`-Flag am `InputEvent.MousePressed`,
+  dient später auch dem Gummiband), Leere-Klick / ESC = leeren. Noch offen:
+  Gummiband als eigener Pending-State und Gruppen-Move über den pluralen
+  `MoveObjects`-Request.)*
 * **Move-Snapping:** spec.md fordert Grid-Snapping beim Verschieben.
   `GridSpec.snapToGrid(...)` existiert, muss in den Move-Pfad integriert
   werden. Demo2-Semantik: Zielposition des primär gezogenen Objekts snappen,
@@ -261,9 +275,6 @@ Beim Umsetzen dieser Features die obigen Goldenen Regeln einhalten:
 * **Persistenz/Serialisierung:** JSON-Format = demo2s Gson-Export (Beispiel:
   `doc/spec.md`), plus `texts`; DTO an der Serialisierungsgrenze konvertiert
   (`Circle.radius` ↔ width/height), Connections per `waypointIds`.
-* **Löschen:** Anforderung bestätigt (demo2). Kaskade siehe „Entschiedene
-  Fragen" Nr. 1 — `DeleteObjects`-Request, DiagramService publiziert alle
-  Entfernungen als explizite Fakten; eine Lösch-Geste = ein Undo-Punkt.
 
 ### ✅ Entschiedene Fragen (beantwortet über die Altvorlage `../demo2`)
 
@@ -280,8 +291,12 @@ Beim Umsetzen dieser Features die obigen Goldenen Regeln einhalten:
    Inline-Editor; ENTER committet (nur bei Änderung ein Undo-Punkt), ESC
    verwirft, Klick daneben committet; Doppelklick auf Text = erneut
    editieren.
-5. **Mehrfachauswahl:** Ctrl+Klick = Toggle, Ctrl+Drag ins Leere =
-   Gummiband, einfacher Klick = Einzel-Auswahl (resettet die Menge).
+5. **Mehrfachauswahl:** Selektion erfolgt bei Maus-Druck (nicht erst beim
+   Loslassen): einfacher Klick = exklusive Auswahl (ersetzt die bisherige),
+   Ctrl+Klick = Objekt zusätzlich aufnehmen bzw. bei bereits Selektiertem
+   wieder herausnehmen (Toggle), Klick auf leere Fläche / ESC = Auswahl
+   leeren. Gummiband (Ctrl+Drag) und Gruppen-Move folgen später.
+   Löschen: ausschließlich DEL-Taste auf die aktuelle Auswahl.
 
 ⚠️ Warnung aus demo2 (Verkrautungs-Beweis, NICHT kopieren): Kaskade und
 Undo-Wissen drifteten auseinander — Undo eines Objekt-Löschens verlor dort

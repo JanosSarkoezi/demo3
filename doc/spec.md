@@ -6,6 +6,14 @@ Was habe ich so geplant fuer den FMC-Editor:
   - Klick auf das Start Objekt (zB K), dann moegliche zwischenpunkte (Waypoints W), und klick auf das Ziel Objekt (zB R). Es koennen 0-n Zwischenpunkte geben. Diese werden durch eine Linie verbunden und an den Ecken abgerunde. Wo die Linie endet, wird ein pfeil zu sehen sein.
 - Verschieben von ausgewaehlten Objekten. Die Auswahl kann ein oder mehrere Objekte enhalten. Diese konnen sowohl Ks, Rs und Ws sien.
   - Beim Verschieben soll ein virtuelles Netz die Objekte an den Kreuzungspunkten kleben lassen bis die Maus naeher an dem neuen Kreuzungspunkt liegt. Spapping.
+- Auswahl von Objekten (Selektion):
+  - Einfacher Klick auf ein Objekt: selektiert dieses Objekt und deselektiert die bisher ausgewaehlten Objekte.
+  - Einfacher Klick auf ein anderes Objekt: selektiert das andere Objekt und deselektiert das aktuell selektierte Objekt.
+  - CTRL+Klick auf ein zweites Objekt: selektiert das zweite Objekt zusaetzlich zum bereits selektierten Objekt.
+  - CTRL+Klick auf ein drittes Objekt: selektiert das dritte Objekt zusaetzlich zu den bereits selektierten Objekten.
+  - CTRL+Klick auf ein bereits selektiertes Objekt: entfernt dieses Objekt wieder aus der Auswahl.
+  - Einfacher Klick auf die leere Flaeche: hebt die Auswahl auf. Ebenso ESC.
+- Loeschen: Die DEL-Taste loescht alle aktuell selektierten Objekte.
 - Groessenanpassung der Ks und Rs
 - Angaben von Text in den Ks und Rs durch Auswahl eines Tools an der Seite.
   - Die Ks werden nur ein Buchstaben enthalten.

@@ -58,6 +58,7 @@ public class DiagramService implements DiagramQuery {
         bus.subscribe(ActionEvent.ResizeObject.class, this::onResizeObject);
         bus.subscribe(ActionEvent.ResizeCircle.class, this::onResizeCircle);
         bus.subscribe(ActionEvent.CreateConnection.class, this::onCreateConnection);
+        bus.subscribe(ActionEvent.DeleteObjects.class, this::onDeleteObjects);
     }
 
     // ---------- Schreibpfad: ActionEvents (Requests) konsumieren ----------
@@ -114,10 +115,102 @@ public class DiagramService implements DiagramQuery {
             return;
         }
 
+        // Waypoints werden zu echten, gespeicherten DiagramObjects
+        // (spezifikationskonform): Die Connection referenziert sie nur per
+        // ID und hält keine zweite Kopie. Pro Waypoint ein ObjectAdded-Fakt,
+        // damit die spätere UI sie über denselben Pfad rendert.
+        List<UUID> waypointIds = new ArrayList<>();
+        for (Waypoint waypoint : event.waypoints()) {
+            objects.put(waypoint.id(), waypoint);
+            waypointIds.add(waypoint.id());
+            publishFact(new DiagramEvent.ObjectAdded(waypoint));
+        }
+
         Connection connection = new Connection(UUID.randomUUID(), event.sourceId(),
-                event.targetId(), event.waypoints(), target.layerId());
+                event.targetId(), waypointIds, target.layerId());
         connections.put(connection.id(), connection);
         publishFact(new DiagramEvent.ConnectionEstablished(connection));
+    }
+
+    /**
+     * Zentrales Löschen mit sichtbarer Kaskade: K/R-Löschen entfernt ihre
+     * Connections mitsamt deren Waypoints; JEDES entfernte Objekt wird
+     * zusätzlich aus allen Waypoint-Listen gestrichen — auch aus Connections,
+     * die bestehen bleiben (geteilte Waypoints räumen sich so automatisch
+     * mit ab, genau die Ecke, in der demo2s geteilte Logik kippte). Alle
+     * Entfernungen erscheinen als Batch-Fakten mit vollständigem Zustand:
+     * Das künftige Undo baut darauf auf und braucht kein eigenes
+     * Kaskade-Wissen (demo2-Lektion).
+     */
+    private void onDeleteObjects(ActionEvent.DeleteObjects event) {
+        List<DiagramObject> removedObjects = new ArrayList<>();
+        List<Connection> removedConnections = new ArrayList<>();
+        LinkedHashMap<UUID, Connection> updatedConnections = new LinkedHashMap<>();
+
+        for (UUID id : event.ids()) {
+            DiagramObject obj = objects.get(id);
+            if (obj == null) {
+                continue; // Unbekannte ID still ignorieren — kein Crash
+            }
+
+            // K/R: angehängte Connections fallen mit in die Kaskade.
+            if (!(obj instanceof Waypoint)) {
+                List<Connection> attached = connections.values().stream()
+                        .filter(conn -> id.equals(conn.sourceId()) || id.equals(conn.targetId()))
+                        .toList();
+                for (Connection conn : attached) {
+                    removeConnectionCascade(conn, removedObjects, removedConnections, updatedConnections);
+                }
+            }
+            removeObjectCascade(obj, removedObjects, updatedConnections);
+        }
+
+        if (!removedObjects.isEmpty()) {
+            publishFact(new DiagramEvent.ObjectsRemoved(List.copyOf(removedObjects)));
+        }
+        if (!updatedConnections.isEmpty()) {
+            publishFact(new DiagramEvent.ConnectionsUpdated(List.copyOf(updatedConnections.values())));
+        }
+        if (!removedConnections.isEmpty()) {
+            publishFact(new DiagramEvent.ConnectionsRemoved(List.copyOf(removedConnections)));
+        }
+    }
+
+    /** Entfernt eine Connection samt ihrer Waypoints und merkt alles für die Fakten vor. */
+    private void removeConnectionCascade(Connection conn, List<DiagramObject> removedObjects,
+                                         List<Connection> removedConnections,
+                                         LinkedHashMap<UUID, Connection> updatedConnections) {
+        if (connections.remove(conn.id()) == null) {
+            return; // Bereits in dieser Kaskade entfernt
+        }
+        removedConnections.add(conn);
+        for (UUID waypointId : conn.waypointIds()) {
+            DiagramObject waypoint = objects.get(waypointId);
+            if (waypoint != null) {
+                removeObjectCascade(waypoint, removedObjects, updatedConnections);
+            }
+        }
+    }
+
+    /** Entfernt das Objekt und streicht seine ID aus allen Waypoint-Listen. */
+    private void removeObjectCascade(DiagramObject obj, List<DiagramObject> removedObjects,
+                                     LinkedHashMap<UUID, Connection> updatedConnections) {
+        if (objects.remove(obj.id()) == null) {
+            return; // Bereits in dieser Kaskade entfernt
+        }
+        removedObjects.add(obj);
+
+        for (Map.Entry<UUID, Connection> entry : connections.entrySet()) {
+            Connection conn = entry.getValue();
+            if (conn.waypointIds().contains(obj.id())) {
+                List<UUID> prunedIds = new ArrayList<>(conn.waypointIds());
+                prunedIds.remove(obj.id());
+                Connection pruned = new Connection(conn.id(), conn.sourceId(),
+                        conn.targetId(), prunedIds, conn.layerId());
+                entry.setValue(pruned);
+                updatedConnections.put(pruned.id(), pruned);
+            }
+        }
     }
 
     // ---------- Lesepfad: DiagramQuery implementieren ----------

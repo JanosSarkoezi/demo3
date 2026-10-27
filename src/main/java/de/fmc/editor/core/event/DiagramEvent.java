@@ -25,4 +25,15 @@ public sealed interface DiagramEvent extends DomainEvent {
     record ConnectionRejected(UUID sourceId, UUID targetId, String reason) implements DiagramEvent {}
 
     record SelectionChanged(List<UUID> selectedIds) implements DiagramEvent {}
+
+    // --- Batch-Fakten einer Lösch-Geste (vollständiger Zustand für späteres Undo) ---
+
+    /** Alle entfernten Objekte (inkl. mitkaskadierter Waypoints). */
+    record ObjectsRemoved(List<DiagramObject> objects) implements DiagramEvent {}
+
+    /** Alle entfernten Connections mit vollständigem Zustand (Waypoint-IDs inklusive). */
+    record ConnectionsRemoved(List<Connection> connections) implements DiagramEvent {}
+
+    /** Connections, deren Waypoint-Listen gestrichen wurden, die aber bestehen bleiben. */
+    record ConnectionsUpdated(List<Connection> connections) implements DiagramEvent {}
 }

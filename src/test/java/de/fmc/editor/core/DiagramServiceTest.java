@@ -204,7 +204,9 @@ class DiagramServiceTest {
         Connection connection = established.getFirst().connection();
         assertThat(connection.sourceId()).isEqualTo(circle.id());
         assertThat(connection.targetId()).isEqualTo(rect.id());
-        assertThat(connection.waypoints()).containsExactly(waypoint);
+        assertThat(connection.waypointIds()).containsExactly(waypoint.id());
         assertThat(diagram.findConnectionById(connection.id())).isPresent();
+        // Waypoints sind seit der ID-Migration echte, gespeicherte Objekte:
+        assertThat(diagram.findById(waypoint.id())).isPresent();
     }
 }

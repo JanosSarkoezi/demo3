@@ -258,3 +258,47 @@ Chronik der Arbeitssessions. Format: Datum / Was / Warum so / Grenzen & Verbesse
   den nächsten Implementationsblöcken (Reihenfolge vorgeschlagen:
   Löschen → Undo/Redo-Fundament → Waypoint-ID-Migration → Multi-Select →
   Text → Persistenz).
+
+## 27.10.2026 (4. Arbeitsblock) — Selektion bei Press, DEL-Löschen & Waypoint-ID-Migration
+
+**Was:**
+
+- Semantik vorher doppelt dokumentiert: doc/spec.md (Produktsicht: Klick-/
+  Ctrl+Klick-Regeln, DEL) und AGENTS.md (Umsetzungssicht: Press-Zeitpunkt,
+  `SetSelection`, Kaskade).
+- **Waypoint-ID-Migration:** `Connection` referenziert `waypointIds`; der
+  DiagramService speichert Waypoints beim `CreateConnection` als echte
+  Objekte (je ein `ObjectAdded`-Fakt) — keine zweite Kopie mehr.
+- **Selektion bei Maus-Druck** (IdleToolState): einfach = exklusiv, Ctrl+Klick
+  = Toggle über das neue `controlDown`-Flag am `InputEvent.MousePressed`
+  (public Kompatibilitäts-Konstruktor hält Bestands-Call-Sites grün; Flag
+  dient später auch dem Gummiband), Leere-Klick und ESC = Auswahl leeren.
+- **DEL-Löschen:** neuer `CustomKeyCode.DELETE` (bewusst ohne Backspace),
+  `DeleteObjects`-Request, uniforme Kaskadenregel im DiagramService — jedes
+  entfernte Objekt wird aus ALLEN Waypoint-Listen gestrichen, K/R-Delete
+  entfernt ihre Connections samt Waypoints. Batch-Fakten `ObjectsRemoved` /
+  `ConnectionsRemoved` / `ConnectionsUpdated` mit vollständigem Zustand.
+  `SelectionService` staubt tote IDs automatisch ab (Invariante: Auswahl
+  enthält nie Tote).
+
+**Warum so:**
+
+- Selektion bei Press statt beim Loslassen: keine Click-vs-Drag-Sonderfälle,
+  demo2-erprobt; der spätere Gruppen-Move bekommt die Auswahl gratis
+  (Guard-Erweiterung: Press auf bereits Selektiertes kollabiert die Menge
+  nicht).
+- EINE uniforme Kaskadenregel statt demo2s zweigeteilter Logik: Geteilte
+  Waypoints räumen sich in fremden Connections automatisch mit ab — genau
+  die Ecke, in der demo2 kippte (Undo verlor dort mitgelöschte Texte).
+- Batch-Fakten tragen den vollständigen entfernten Zustand: Das künftige
+  Undo-Command baut darauf auf und braucht kein eigenes Kaskade-Wissen.
+
+**Grenzen & Verbesserungskandidaten:**
+
+- Waypoints sind bis zur Layer-Sichtbarkeit nicht klick-selektierbar
+  (`findTopmostAt` spart sie aus) — Ctrl+Klick auf Waypoints greift daher
+  noch nicht.
+- Löschen ist noch nicht undo-fähig; `ConnectionsUpdated` trägt den
+  Nach-Zustand, Undo braucht zusätzlich den Vor-Zustand (Design in Block 3).
+- `mvn test`: 45/45 grün (33 + 8 `ClickSelectionTest` + 4 `DeleteObjectsTest`;
+  `DiagramServiceTest` auf `waypointIds` + Objekt-Store umgestellt).

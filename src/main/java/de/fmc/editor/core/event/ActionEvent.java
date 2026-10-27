@@ -38,6 +38,12 @@ public sealed interface ActionEvent extends DomainEvent {
     record AddElement(DiagramObject object) implements ActionEvent {
     }
 
+    // Zentrales Löschen inkl. Kaskade (Connections und deren Waypoints);
+    // alle Entfernungen erscheinen als Batch-Fakten (ObjectsRemoved,
+    // ConnectionsRemoved) mit vollständigem Zustand — Undo-Grundlage.
+    record DeleteObjects(List<UUID> ids) implements ActionEvent {
+    }
+
     record MoveObject(UUID id, double deltaX, double deltaY) implements ActionEvent {
     }
 
