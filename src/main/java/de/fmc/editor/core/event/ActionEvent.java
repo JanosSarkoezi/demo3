@@ -16,8 +16,10 @@ public sealed interface ActionEvent extends DomainEvent {
     record ZoomView(double zoomFactor, double pivotX, double pivotY) implements ActionEvent {
     }
 
-    // Anfrage der Tool-Machine an die Camera-Machine, das Panning zu übernehmen
-    record RequestCameraPan(double startX, double startY) implements ActionEvent {
+    // Anfrage der Tool-Machine an die Camera-Machine, das Panning zu übernehmen.
+    // button = die Taste, die die Geste gestartet hat — nur ihr Loslassen
+    // beendet das Panning (siehe CameraPanningState).
+    record RequestCameraPan(double startX, double startY, CustomMouseButton button) implements ActionEvent {
     }
 
     // --- Werkzeug-Steuerung (von UI-Toolbar oder Shortcut) ---
@@ -48,8 +50,5 @@ public sealed interface ActionEvent extends DomainEvent {
     }
 
     record CreateConnection(UUID sourceId, UUID targetId, List<Waypoint> waypoints) implements ActionEvent {
-    }
-
-    record AddWaypoint(UUID connectionId, double x, double y) implements ActionEvent {
     }
 }

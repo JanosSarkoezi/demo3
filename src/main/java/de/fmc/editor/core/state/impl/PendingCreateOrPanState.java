@@ -28,7 +28,9 @@ public final class PendingCreateOrPanState extends BaseState {
         addRule(InputEvent.MouseDragged.class,
                 (e, c) -> distance(startScreenX, startScreenY, e.x(), e.y()) > DRAG_THRESHOLD_PIXELS,
                 (e, c) -> {
-                    c.publisher().publish(new ActionEvent.RequestCameraPan(startScreenX, startScreenY));
+                    // PRIMARY: Diese Geste startete mit einem Linksklick —
+                    // nur dessen Loslassen beendet das Panning.
+                    c.publisher().publish(new ActionEvent.RequestCameraPan(startScreenX, startScreenY, CustomMouseButton.PRIMARY));
                     return returnToToolState(); // Tool pausiert und geht zurück in Grundzustand
                 });
 

@@ -1,0 +1,241 @@
+Was habe ich so geplant fuer den FMC-Editor:
+- Es soll allgemein eine Verschiebung des Canvas moegliche sein
+- Es soll allgemein ein Zoom an der Stelle des Mauszeigers mit dem Mausrad moeglich sein.
+- Erstellen von Kreisen (K) und Rechtecken (R) durch Auswahl eines Tools an der Seite. Also ein Tool fuer Ks udn eins fuer Rs.
+- Erstellen von Verbindugen durch die Auswahl eines Tool an der Seite.
+  - Klick auf das Start Objekt (zB K), dann moegliche zwischenpunkte (Waypoints W), und klick auf das Ziel Objekt (zB R). Es koennen 0-n Zwischenpunkte geben. Diese werden durch eine Linie verbunden und an den Ecken abgerunde. Wo die Linie endet, wird ein pfeil zu sehen sein.
+- Verschieben von ausgewaehlten Objekten. Die Auswahl kann ein oder mehrere Objekte enhalten. Diese konnen sowohl Ks, Rs und Ws sien.
+  - Beim Verschieben soll ein virtuelles Netz die Objekte an den Kreuzungspunkten kleben lassen bis die Maus naeher an dem neuen Kreuzungspunkt liegt. Spapping.
+- Groessenanpassung der Ks und Rs
+- Angaben von Text in den Ks und Rs durch Auswahl eines Tools an der Seite.
+  - Die Ks werden nur ein Buchstaben enthalten.
+  - Die Rs koennen mehrzeiligen Text enthalten. Sie sollen Zentriert werden koennen.
+  - Zu einem K koennen auserhalb ein oder mehrere Texte zugeordnet sein.
+  - Zu einem R koennen auserhalb kein oder mehrere Texte zugeordnet sein.
+- Das geammte gezeichnete Objekt kann im volgenden Format gespeichert werden:
+```json
+{
+  "objects": [
+    {
+      "id": "646e01ac-9b48-4503-8a55-c7b7c6cfa766",
+      "type": "CIRCLE",
+      "x": 200.0,
+      "y": 200.0,
+      "width": 40.0,
+      "height": 40.0,
+      "layerId": "00000000-0000-0000-0000-000000000000"
+    },
+    {
+      "id": "9baf090b-06a5-46ef-aa16-8e146ab0dade",
+      "type": "RECTANGLE",
+      "x": 200.0,
+      "y": 720.0,
+      "width": 124.0,
+      "height": 74.0,
+      "layerId": "00000000-0000-0000-0000-000000000000"
+    },
+    {
+      "id": "4a90fc9e-4569-4f65-8cf2-2cbc88370e98",
+      "type": "WAYPOINT",
+      "x": 300.0,
+      "y": 640.0,
+      "width": 10.0,
+      "height": 10.0,
+      "layerId": "11111111-1111-1111-1111-111111111111"
+    },
+    {
+      "id": "3ca4ac09-d15b-4074-adc9-a911be15bb6a",
+      "type": "CIRCLE",
+      "x": 200.0,
+      "y": 400.0,
+      "width": 40.0,
+      "height": 40.0,
+      "layerId": "00000000-0000-0000-0000-000000000000"
+    },
+    {
+      "id": "96b4e753-e2e0-4844-a640-90dabb1ef442",
+      "type": "WAYPOINT",
+      "x": 80.0,
+      "y": 560.0,
+      "width": 10.0,
+      "height": 10.0,
+      "layerId": "11111111-1111-1111-1111-111111111111"
+    },
+    {
+      "id": "8a2432d5-7469-461b-afa8-dbe5a6cfa2c6",
+      "type": "WAYPOINT",
+      "x": 540.0,
+      "y": 520.0,
+      "width": 10.0,
+      "height": 10.0,
+      "layerId": "11111111-1111-1111-1111-111111111111"
+    },
+    {
+      "id": "f59ff5d8-6d0a-46eb-a409-cec6e010c071",
+      "type": "WAYPOINT",
+      "x": 200.0,
+      "y": 560.0,
+      "width": 10.0,
+      "height": 10.0,
+      "layerId": "11111111-1111-1111-1111-111111111111"
+    },
+    {
+      "id": "371a67e4-57cb-46f3-99b4-62e94eaf345e",
+      "type": "RECTANGLE",
+      "x": 200.0,
+      "y": 280.0,
+      "width": 144.0,
+      "height": 68.0,
+      "layerId": "00000000-0000-0000-0000-000000000000"
+    },
+    {
+      "id": "79787493-a9bd-478f-9ca7-5422884b6d7b",
+      "type": "RECTANGLE",
+      "x": 200.0,
+      "y": 500.0,
+      "width": 131.4051513671875,
+      "height": 76.0074462890625,
+      "layerId": "00000000-0000-0000-0000-000000000000"
+    },
+    {
+      "id": "68b21af4-c774-426b-99d0-df180cca77d7",
+      "type": "WAYPOINT",
+      "x": 300.0,
+      "y": 600.0,
+      "width": 10.0,
+      "height": 10.0,
+      "layerId": "11111111-1111-1111-1111-111111111111"
+    },
+    {
+      "id": "6986719e-21a1-4407-a03f-11752ab35ef3",
+      "type": "WAYPOINT",
+      "x": 440.0,
+      "y": 720.0,
+      "width": 10.0,
+      "height": 10.0,
+      "layerId": "11111111-1111-1111-1111-111111111111"
+    },
+    {
+      "id": "45b321ce-a369-44a2-a5ce-e60c79ecf0ed",
+      "type": "CIRCLE",
+      "x": 200.0,
+      "y": 620.0,
+      "width": 40.0,
+      "height": 40.0,
+      "layerId": "00000000-0000-0000-0000-000000000000"
+    },
+    {
+      "id": "c7523b4a-1efc-4168-a557-4bbdb4984c0b",
+      "type": "WAYPOINT",
+      "x": 540.0,
+      "y": 720.0,
+      "width": 10.0,
+      "height": 10.0,
+      "layerId": "11111111-1111-1111-1111-111111111111"
+    },
+    {
+      "id": "16116ae9-ce2b-4ac5-9a1b-b80f2e03ccf7",
+      "type": "WAYPOINT",
+      "x": 80.0,
+      "y": 340.0,
+      "width": 10.0,
+      "height": 10.0,
+      "layerId": "11111111-1111-1111-1111-111111111111"
+    },
+    {
+      "id": "bafe3a89-cd6a-41b5-98cd-56414c0bd916",
+      "type": "WAYPOINT",
+      "x": 200.0,
+      "y": 340.0,
+      "width": 10.0,
+      "height": 10.0,
+      "layerId": "11111111-1111-1111-1111-111111111111"
+    },
+    {
+      "id": "e6c2ab3d-1660-4e59-8c9d-d65c36dd3006",
+      "type": "WAYPOINT",
+      "x": 440.0,
+      "y": 520.0,
+      "width": 10.0,
+      "height": 10.0,
+      "layerId": "11111111-1111-1111-1111-111111111111"
+    },
+    {
+      "id": "94115c80-3693-492e-8c89-1505c47b7d64",
+      "type": "RECTANGLE",
+      "x": 540.0,
+      "y": 620.0,
+      "width": 188.0,
+      "height": 112.0,
+      "layerId": "00000000-0000-0000-0000-000000000000"
+    }
+  ],
+  "connections": {
+    "4372db31-9b26-4266-be31-59f039068335": {
+      "sourceId": "3ca4ac09-d15b-4074-adc9-a911be15bb6a",
+      "targetId": "79787493-a9bd-478f-9ca7-5422884b6d7b",
+      "waypointIds": []
+    },
+    "90fed3d5-3213-4547-9646-baa26b3edd94": {
+      "sourceId": "45b321ce-a369-44a2-a5ce-e60c79ecf0ed",
+      "targetId": "9baf090b-06a5-46ef-aa16-8e146ab0dade",
+      "waypointIds": []
+    },
+    "ed1ab53a-eaa4-4ec6-abdb-ecec44630bb7": {
+      "sourceId": "371a67e4-57cb-46f3-99b4-62e94eaf345e",
+      "targetId": "45b321ce-a369-44a2-a5ce-e60c79ecf0ed",
+      "waypointIds": [
+        "bafe3a89-cd6a-41b5-98cd-56414c0bd916",
+        "16116ae9-ce2b-4ac5-9a1b-b80f2e03ccf7",
+        "96b4e753-e2e0-4844-a640-90dabb1ef442",
+        "f59ff5d8-6d0a-46eb-a409-cec6e010c071"
+      ]
+    },
+    "d86e972a-d8a1-4572-b201-252edaf8ebf4": {
+      "sourceId": "79787493-a9bd-478f-9ca7-5422884b6d7b",
+      "targetId": "45b321ce-a369-44a2-a5ce-e60c79ecf0ed",
+      "waypointIds": []
+    },
+    "720655dd-9b18-4a17-9a34-4cc6dcb34a32": {
+      "sourceId": "94115c80-3693-492e-8c89-1505c47b7d64",
+      "targetId": "45b321ce-a369-44a2-a5ce-e60c79ecf0ed",
+      "waypointIds": [
+        "c7523b4a-1efc-4168-a557-4bbdb4984c0b",
+        "6986719e-21a1-4407-a03f-11752ab35ef3",
+        "4a90fc9e-4569-4f65-8cf2-2cbc88370e98"
+      ]
+    },
+    "fc8801da-45a5-407f-bad6-430ca487eccf": {
+      "sourceId": "646e01ac-9b48-4503-8a55-c7b7c6cfa766",
+      "targetId": "371a67e4-57cb-46f3-99b4-62e94eaf345e",
+      "waypointIds": []
+    },
+    "4a8b98e5-ce47-484b-b6c4-4ccaa36067d0": {
+      "sourceId": "45b321ce-a369-44a2-a5ce-e60c79ecf0ed",
+      "targetId": "94115c80-3693-492e-8c89-1505c47b7d64",
+      "waypointIds": [
+        "68b21af4-c774-426b-99d0-df180cca77d7",
+        "e6c2ab3d-1660-4e59-8c9d-d65c36dd3006",
+        "8a2432d5-7469-461b-afa8-dbe5a6cfa2c6"
+      ]
+    },
+    "069cc530-1334-4fd0-9f12-759d30234669": {
+      "sourceId": "371a67e4-57cb-46f3-99b4-62e94eaf345e",
+      "targetId": "3ca4ac09-d15b-4074-adc9-a911be15bb6a",
+      "waypointIds": []
+    }
+  },
+  "layers": [
+    {
+      "id": "00000000-0000-0000-0000-000000000000",
+      "name": "Standard",
+      "visible": true
+    },
+    {
+      "id": "11111111-1111-1111-1111-111111111111",
+      "name": "Wegpunkte",
+      "visible": false
+    }
+  ]
+}
+```

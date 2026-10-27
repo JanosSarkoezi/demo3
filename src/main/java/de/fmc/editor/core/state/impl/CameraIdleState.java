@@ -18,12 +18,12 @@ public final class CameraIdleState implements CameraState {
     public CameraState handleInput(DomainEvent event, InteractionContext context) {
         // 1. Ein Tool fordert Panning an (z.B. Ziehen auf freier Fläche im CircleTool)
         if (event instanceof ActionEvent.RequestCameraPan request) {
-            return new CameraPanningState(request.startX(), request.startY());
+            return new CameraPanningState(request.startX(), request.startY(), request.button());
         }
 
         // 2. Direkter Panning-Start via mittlerer Maustaste
         if (event instanceof InputEvent.MousePressed mp && mp.button() == CustomMouseButton.MIDDLE) {
-            return new CameraPanningState(mp.x(), mp.y());
+            return new CameraPanningState(mp.x(), mp.y(), CustomMouseButton.MIDDLE);
         }
 
         // 3. Zoom via Mausrad

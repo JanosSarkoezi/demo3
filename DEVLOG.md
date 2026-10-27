@@ -121,3 +121,140 @@ Chronik der Arbeitssessions. Format: Datum / Was / Warum so / Grenzen & Verbesse
   Pragmatismus statt Property-Based-Testing.
 - `mvn test`: 28/28 grün (alle bestehenden Interaktions-Tests bestätigten,
   dass die Guard-Verschärfungen kein Verhalten geändert haben).
+
+## 27.10.2026 — KI-Analysen-Faktencheck & spec.md-Integration in AGENTS.md
+
+**Was:**
+
+- Drei externe KI-Projektanalysen (`chatgpt.md`, `gemini.md`, `deepseek.md`)
+  vor Übernahme Behauptung für Behauptung gegen den echten Code verifiziert.
+  Bestätigt u. a.: finaler `CameraInfo`-Snapshot im Bus (nie aktualisiert nach
+  Pan/Zoom), guard-lose `KeyPressed`-Regel im `IdleToolState`, totes
+  `AddWaypoint`-Event, fehlender Button-Guard in `CameraPanningState`.
+  Widerlegt: DeepSeeks „keine Tests" (8 Testklassen vorhanden — alle drei
+  Analysen basierten offenbar auf einem gepackten Snapshot ohne Test-Sources).
+- Findings triagiert: sofort sinnvoll (Kamera-Aktualisierung, Guard-Fix,
+  AddWaypoint, Button-Guard) / Design-Entscheidung (Klick-Semantik,
+  Tool-State-Zentralisierung) / bewusst NICHT machen (Geminis vorsorgliche
+  Abstraktionen — widerspricht Goldener Regel „keine Generalisierung auf
+  Vorrat").
+- `spec.md` als verbindliche Produktvision in die AGENTS.md eingearbeitet:
+  neue Sektion „Produktvision", Geplant-Einträge um spec-Bestätigungen ergänzt
+  (Layer-System, Mehrfachauswahl), neue Punkte (Move-Snapping, Text-Feature,
+  Persistenz, Löschen) und ein Offene-Fragen-Block.
+- Zwei aus der Spec abgeleitete Modell-Entscheidungen dokumentiert:
+  Waypoint-Referenzierung per ID (Ist: `Connection` bettet noch
+  `List<Waypoint>`-Instanzen ein) und Circle `radius` vs. JSON-Bounding-Box.
+
+**Warum so:**
+
+- KI-Reviews liefern Hypothesen, keine Fakten: erst Code-Verifikation, dann
+  Integration — sonst landen Phantom-Befunde („keine Tests") in Entscheidungen.
+  Dass zwei Modelle unabhängig dieselbe falsche Aussage trafen, zeigt: Das
+  Problem war ihr unvollständiger Input, nicht der Code.
+- Die Vision steht jetzt in der AGENTS.md statt nur als spec.md-Verweis:
+  Jede Session sieht Zielrichtung und offene Entscheidungen sofort; die
+  spec.md bleibt unangetastetes Beispieldokument (inkl. JSON-Format).
+- Spec-Inhalte wurden mit Ist-Zustand verschränkt („implementiert" /
+  „noch unmodelliert" / „Ist-Zustand weicht ab") statt wörtlich kopiert —
+  die AGENTS.md bleibt Doku des Ist-Zustands mit klar markierter Zukunft.
+
+**Grenzen & Verbesserungskandidaten:**
+
+- Die fünf offenen Fragen (Löschen, Undo/Redo, Move-Semantik bei Connections,
+  Text-UX, Multi-Select-Mechanik) sind dokumentiert, aber ungelöst — Klärung
+  über die ältere, weiterentwickelte Projektversion geplant.
+- Keine Code-Änderungen in dieser Session — die vier „sofort sinnvoll"-Fixes
+  aus dem Faktencheck stehen noch aus (gute Kandidaten für den nächsten Block).
+- `chatgpt.md`/`gemini.md`/`deepseek.md` liegen als Artefakte im Repo;
+  über Aufnahme ins Repo oder .gitIgnore sollte der User entscheiden.
+
+## 27.10.2026 (2. Arbeitsblock) — doc/-Umzug, Kamera-Konsistenz & Guard-Fixes
+
+**Was:**
+
+- `doc/` angelegt; KI-Analysen (`chatgpt.md`, `gemini.md`, `deepseek.md`) und
+  `spec.md` dorthin verschoben — Root enthält nur noch AGENTS.md/DEVLOG.md;
+  AGENTS.md-Referenz auf `doc/spec.md` angepasst.
+- **Kamera-Konsistenz** (wichtigster Fund aus dem Faktencheck, ChatGPT): Der
+  Bus hielt `CameraInfo` als finalen Start-Snapshot. `publish()` konsumiert
+  jetzt selbst `PanView`/`ZoomView` und ersetzt den Snapshot via neuer
+  `CameraInfo.panBy(...)`/`zoomAt(factor, pivotX, pivotY)`-Methoden;
+  `getCameraInfo()` exponiert den Snapshot read-only (Tests, spätere UI).
+- **Guard-Fix `IdleToolState`** (DeepSeek #2): Shortcut-Regeln jetzt
+  guard-disjunkt pro Key statt `default`-Switch, der auf jedes `KeyPressed`
+  matchte.
+- **Button-Guard `CameraPanningState`** (DeepSeek #7): `RequestCameraPan`
+  trägt nun die auslösende Taste; Panning endet nur beim Loslassen genau
+  dieser Taste.
+- **Totes `ActionEvent.AddWaypoint` entfernt** (ChatGPT: „Events müssen einen
+  klaren Zweck haben"); Preview-Events für ConnectingState kommen mit dem
+  UI-Meilenstein zurück.
+
+**Warum so:**
+
+- Ohne Snapshot-Update hätte nach dem ersten Pan/Zoom jede
+  screenToWorld-Rechnung (Hit-Tests, Erstellen, Verschieben) mit den
+  Start-Offsets gerechnet. Die Mathematik liegt laut Goldener Regel 3 in
+  `CameraInfo` (reine Funktionen), der Bus ist Besitzer des Snapshots.
+- Der default-Switch im `IdleToolState` hätte beim ersten Ergänzen einer
+  ESC-Regel die Guard-Disjunktions-Invariante zur Laufzeit gesprengt — jetzt
+  gilt die Konvention überall einheitlich.
+- `AddWaypoint` hatte weder Publisher noch Konsumenten; die Absicht
+  (Waypoint-Preview) lebt als DEVLOG-Notiz weiter statt als toter Code.
+
+**Grenzen & Verbesserungskandidaten:**
+
+- `zoomAt` weist newZoom <= 0 ab (Kamera unverändert); sinnvolle Zoom-Limits
+  (min/max) sind noch offen.
+- Bekannter Jump beim tool-initiierten Panning: der erste Drag-Event wird vom
+  Zustandsübergang konsumiert (analog Move), Pan-Deltas laufen ab der
+  Start-Position — kosmetisch, erst mit UI sichtbar.
+- `mvn test`: 33/33 grün (28 bestehende + 5 neue `CameraConsistencyTest`:
+  Pan-Snapshot, Zoom-am-Pivot, Hit-Test nach Pan, Button-Guard,
+  tool-initiiertes Panning).
+
+## 27.10.2026 (3. Arbeitsblock) — Altvorlagen-Analyse demo2: Fragen entschieden
+
+**Was:**
+
+- Die ältere, weiterentwickelte Projektversion `~/dev/git/demo2` (72 Java-
+  Dateien: UI, CommandHistory, Text, Layer, Persistenz, Routing) systematisch
+  gesichtet und gegen demo3 abgeglichen.
+- Alle fünf offenen Fragen als entschieden in die AGENTS.md eingearbeitet
+  („✅ Entschiedene Fragen"): Lösch-Kaskade, Undo/Redo ja,
+  Waypoints-bleiben-stehen/Texte-folgen, Inline-Text-UX (ENTER/ESC),
+  Ctrl-Mechanik für Mehrfachauswahl.
+- Weitere Geplant-Punkte mit demo2-Wissen angereichert: Waypoint-
+  Nachbearbeitung (Doppelklick auf Verbindung, Einfüge-Index per Geometrie),
+  Routing als View-Strategy (1:1 portierbar), Text als DiagramObject mit
+  EINER Auswahl-Menge, JSON-Format = demo2s Gson-Export inkl. `texts`,
+  Move-Snapping-Semantik (primäres Objekt snappen, Gruppe folgt Delta).
+- Zwei Neuentwicklungen identifiziert (auch ggü. demo2 neu): innerer
+  Buchstabe im K, Modell-Entscheidung typisierte Records behalten + DTO
+  konvertiert `Circle.radius` ↔ JSON-Bounding-Box.
+
+**Warum so:**
+
+- demo2 beantwortet die Fragen praktisch — zeigt aber zugleich exakt die
+  Verkrautung, deretwegen demo3 neu startet: `CoreRegistry` als Gott-Objekt
+  mit öffentlichen Mutatoren (zwei Schreibpfade), versteckte Kaskaden
+  (`moveObject` verschiebt still assoziierte Texte mit), Dual-Mode-States
+  (`eventBus != null ? publish : direkt` — halbfertige Migration), JavaFX
+  im State-Layer, zwei parallele Selection-Sets, inline duplizierte
+  Snap-Logik, Debug-Debris in der CommandHistory.
+- Konkreter Bug als Warnung dokumentiert: Undo eines Objekt-Löschens verlor
+  in demo2 die mitgelöschten Texte dauerhaft — Kaskade (Registry) und
+  Undo-Wissen (Command) waren auseinandergedriftet. Konsequenz für demo3:
+  Kaskaden als sichtbare Fakten im DiagramService; Commands bauen auf den
+  Fakten auf und bilden Kaskade-Wissen nie doppelt ab.
+
+**Grenzen & Verbesserungskandidaten:**
+
+- Die demo2-Sichtung war fokussiert (Registry, Commands, States, Modell,
+  Persistenz, Selection); ViewMapper/Controller-Details (507 Zeilen
+  CanvasController) nur am Rande — bei UI-Beginn ggf. vertiefen.
+- Kein Code geändert in diesem Block — die Entscheidungen wirken erst in
+  den nächsten Implementationsblöcken (Reihenfolge vorgeschlagen:
+  Löschen → Undo/Redo-Fundament → Waypoint-ID-Migration → Multi-Select →
+  Text → Persistenz).

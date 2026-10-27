@@ -25,7 +25,10 @@ public class InteractionEventBus implements EventBusPublisher {
 
     // Read-Only-Dependencies für den InteractionContext
     private final DiagramQuery diagramQuery;
-    private final CameraInfo cameraInfo;
+    // Bewusst NICHT final: Der Bus hält den aktuellen Kamera-Snapshot und
+    // aktualisiert ihn selbst bei PanView/ZoomView (siehe publish) — sonst
+    // rechnen alle nachfolgenden Interaktionen mit veralteten Offsets/Zoom.
+    private CameraInfo cameraInfo;
     private final GridSpec gridSpec;
     private final SelectionQuery selectionQuery;
 
@@ -68,6 +71,16 @@ public class InteractionEventBus implements EventBusPublisher {
             }
         }
 
+        // 3a. Kamera-Snapshot aktualisieren: PanView/ZoomView sind Fakten, die
+        // der Bus selbst konsumiert — jeder NÄCHSTE Event-Durchlauf baut seinen
+        // InteractionContext bereits mit der aktuellen Kamera (Hit-Tests,
+        // Erstellen, Verschieben rechnen dann mit echten Welt-Koordinaten).
+        if (event instanceof ActionEvent.PanView pan) {
+            this.cameraInfo = cameraInfo.panBy(pan.deltaX(), pan.deltaY());
+        } else if (event instanceof ActionEvent.ZoomView zoom) {
+            this.cameraInfo = cameraInfo.zoomAt(zoom.zoomFactor(), zoom.pivotX(), zoom.pivotY());
+        }
+
         // 4. Event an alle externen Subscriber verteilen (Canvas, DiagramService, etc.)
         for (var subscriber : subscribers) {
             subscriber.accept(event);
@@ -80,5 +93,10 @@ public class InteractionEventBus implements EventBusPublisher {
 
     public CameraState getCameraState() {
         return cameraState;
+    }
+
+    /** Aktueller Kamera-Snapshot (read-only) — für Tests und die spätere UI. */
+    public CameraInfo getCameraInfo() {
+        return cameraInfo;
     }
 }

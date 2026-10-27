@@ -11,6 +11,50 @@ strikte Trennung zwischen Interaktionslogik (Core) und späterer UI (JavaFX).
 
 ---
 
+## 🎯 Produktvision (verbindlich — Quelle: `spec.md`)
+
+Die `spec.md` im `doc/`-Verzeichnis beschreibt die Zielversion des Editors. Kernanforderungen:
+
+* **Canvas:** Panning; Zoom am Mauszeiger per Mausrad (implementiert).
+* **Werkzeuge (Sidebar + Shortcuts):** Kreis (K), Rechteck (R), Verbindung,
+  Text.
+* **Verbindungen:** Klick auf Start-Objekt, 0-n Waypoints (W), Klick auf
+  Ziel-Objekt. Segmente an den Ecken abgerundet, am Ziel-Ende ein Pfeil
+  (gerichtete Kante).
+* **Selektion & Move:** Auswahl umfasst 1..n Objekte (Ks, Rs und Ws). Beim
+  Verschieben snappt die Position an Grid-Kreuzungspunkte.
+* **Resize:** nur Ks und Rs (symmetrisch ums Zentrum — wie implementiert).
+* **Text (noch unmodelliert — größte offene Funktionslücke):**
+  * K enthält genau einen Buchstaben (auch in der Altvorlage demo2 NICHT
+    umgesetzt — echte Neuentwicklung).
+  * R enthält mehrzeiligen, zentrierbaren Text.
+  * Externe Texte: 1..n pro K, 0..n pro R — als eigener DiagramObject-Typ
+    `Text` mit `parentObjectId`-Assoziation (demo2-Modell), damit einheitlich
+    selektierbar/verschiebbar und EINE Auswahl-Menge genügt (demo2 hatte zwei
+    parallele Selection-Sets — nicht kopieren).
+* **Persistenz (JSON, Beispiel siehe `doc/spec.md`):** Das Format ist der
+  Gson-Export der Altvorlage demo2 (`DiagramData`): `objects` uniformly als
+  Bounding-Box (x/y/width/height), `connections` als Map mit
+  sourceId/targetId/waypointIds, `layers` mit Sichtbarkeits-Flag — plus
+  `texts` (demo2 hatte sie im DTO, das spec-Beispiel zeigt sie noch nicht).
+
+### Aus der Spec abgeleitete Modell-Entscheidungen
+
+* **Waypoint-Referenzierung per ID:** Waypoints sind eigenständige
+  DiagramObjects (ID, Position, layerId); Connections referenzieren sie per
+  `waypointIds` — so hat es demo2 praktiziert. ⚠️ Ist-Zustand: `Connection`
+  bettet noch `List<Waypoint>`-Instanzen ein — bei Move eines W existieren
+  zwei Kopien. Migration auf ID-Referenzen geplant (spezifikationskonform).
+* **Circle-Speicherung — typisiertes Modell behalten:** JSON nutzt
+  width/height, weil demo2 EIN `FmcObject`-Record mit Bounding-Box für alle
+  Typen nutzte. Empfehlung: Das sealed, typisierte Modell behalten
+  (compiler-erzwungene Exhaustivität statt Enum-Switches) und am
+  Serialisierungsrand per DTO konvertieren (`Circle.radius` ↔ width/height =
+  Durchmesser). Offen: ob x/y im Format Ecke-oben-links ist (Modell rechnet
+  resize-seitig zentriert).
+
+---
+
 ## 🏗️ Kernarchitektur (Ist-Zustand)
 
 ### 1. Datenmodell (Core, immutable)
@@ -23,7 +67,9 @@ strikte Trennung zwischen Interaktionslogik (Core) und späterer UI (JavaFX).
 * **`Connection`** (Record): Kante zwischen zwei DiagramObjects mit
   Waypoint-Liste; bewusst kein `DiagramObject` (kein Klick-Ziel).
 * **`CameraInfo`** (Record): zoom, offsetX/offsetY, defaultLayerId — inklusive
-  `screenToWorldX/Y`-Umrechnung. Bildschirm-Koordinaten werden **immer** am
+  `screenToWorldX/Y`-Umrechnung sowie `panBy`/`zoomAt` (reine
+  Koordinaten-Mathematik; der Bus aktualisiert seinen Snapshot bei
+  `PanView`/`ZoomView`). Bildschirm-Koordinaten werden **immer** am
   `InteractionContext` in Welt-Koordinaten umgerechnet, nie direkt in States.
 
 ### 2. Event-System (Sealed DomainEvents)
@@ -39,7 +85,7 @@ drei Zweigen:
   leer = abwählen), `AddElement` (fertiges Record inkl. UUID), `MoveObject`
   (Delta in Welt-Koordinaten), `ResizeObject` / `ResizeCircle` (nur Maße —
   das Zentrum bleibt garantiert erhalten), `CreateConnection` (mit
-  Waypoint-Liste), `AddWaypoint`.
+  Waypoint-Liste).
 * **`DiagramEvent`** (Fakten von Diagram- & SelectionService): Antwort auf
   Requests — `ObjectAdded`, `ObjectMovedApplied`, `ObjectResizedApplied`
   (trägt das geänderte Objekt), `ConnectionEstablished`,
@@ -72,11 +118,16 @@ Bus ↔ Service: `new DiagramService()` → `new InteractionEventBus(service, �
 Der Bus ist die zentrale Schaltstelle (`implements EventBusPublisher`):
 
 1. **Kamera-Machine zuerst:** verarbeitet `InputEvent`s und
-   `RequestCameraPan`.
+   `RequestCameraPan` (trägt die auslösende Maustaste — nur deren Loslassen
+   beendet das Panning).
 2. **Tool-Machine nur, wenn die Kamera nicht aktiv panned**
    (`cameraState.isActive()`); während des Pannings ist das Werkzeug
    pausiert.
-3. **Subscriber-Versand:** Externe (spätere UI, DiagramService,
+3. **Kamera-Snapshot aktuell halten:** Der Bus konsumiert `PanView`/`ZoomView`
+   selbst und ersetzt seinen `CameraInfo`-Snapshot via `panBy`/`zoomAt` —
+   jeder folgende Event-Durchlauf rechnet mit der aktuellen Kamera.
+   Read-only-Zugriff für Tests/UI: `getCameraInfo()`.
+4. **Subscriber-Versand:** Externe (spätere UI, DiagramService,
    SelectionService) abonnieren typgefiltert via
    `subscribe(Class<T>, Consumer<T>)`.
 
@@ -172,17 +223,72 @@ Beim Umsetzen dieser Features die obigen Goldenen Regeln einhalten:
 * **Weitere Validierung:** Neue Verbindungsregeln (Waypoint-Anzahl, Layer-Regeln
   u. ä.) als zusätzliche `ConnectionRule`s im `DiagramService` ergänzen —
   nie in den States.
-* **Undo/Redo:** Kein Command-Pattern vorhanden. Falls eingeführt: pro Geste
-  genau ein Command (siehe Abschnitt 5).
+* **Undo/Redo:** Anforderung bestätigt (demo2: `CommandHistory` mit
+  execute/undo/redo; Redo-Stack leert sich bei neuer Aktion). Noch kein
+  Command-Pattern vorhanden. Bei Einführung: pro Geste genau ein Command —
+  Drag-Preview läuft über den Bus, niemals per direktem Service-Griff
+  (demo2-Krankheit: zwei Schreibpfade).
 * **Layer-System:** Records haben bereits `layerId` und `CameraInfo` ein
   `defaultLayerId` — aber es gibt keine `Layer`-Objekte und keine
-  Sichtbarkeitssteuerung.
+  Sichtbarkeitssteuerung. *(Bestätigt durch spec.md: Sichtbarkeits-Steuerung,
+  Ebenen „Standard" und „Wegpunkte", letztere default unsichtbar.)*
 * **Routing:** Verbindungslinien werden noch nicht geroutet (keine
-  `RoutingStrategy`).
+  `RoutingStrategy`). demo2 zeigt die Ziel-Form: Strategy-Interface mit
+  Straight/Orthogonal/RoundedCorner — reine View-Schicht, 1:1 portierbar.
+* **Waypoint-Nachbearbeitung:** Doppelklick auf eine Verbindung fügt einen
+  Waypoint an der Klick-Position ein (demo2: Einfüge-Index per Geometrie —
+  diese Logik gehört in den Core und ist testbar); Klick auf Verbindung
+  blendet den Wegpunkt-Layer ein, Drag ins Leere wieder aus. Genau hier
+  kehrt das am 27.10. entfernte `AddWaypoint`-Event als Request zurück
+  (damals tot — jetzt mit echtem Anwendungsfall).
 * **Mehrfachauswahl:** Infrastruktur steht (`SelectionService`, `SetSelection`,
-  `SelectionChanged`). Offen: Shift-Klick, Gummiband-Auswahl und Gruppen-Move
-  (pluraler `MoveObjects`-Request). Resize-Handles sind nur bei genau einem
-  ausgewählten Objekt sinnvoll.
+  `SelectionChanged`). Offen bleibt der plurale `MoveObjects`-Request.
+  Resize-Handles sind nur bei genau einem ausgewählten Objekt sinnvoll.
+  *(Bestätigt durch spec.md; Mechanik gemäß demo2: Ctrl+Klick = Toggle,
+  Ctrl+Drag ins Leere = Gummiband, einfacher Klick = Einzel-Auswahl mit
+  Reset. Gummiband als eigener Pending-State, Ergebnis deklarativ als
+  `SetSelection`.)*
+* **Move-Snapping:** spec.md fordert Grid-Snapping beim Verschieben.
+  `GridSpec.snapToGrid(...)` existiert, muss in den Move-Pfad integriert
+  werden. Demo2-Semantik: Zielposition des primär gezogenen Objekts snappen,
+  Gruppe folgt dem resultierenden Delta — zentral in `GridSpec`, nicht wie
+  in demo2 inline dupliziert.
+* **Text-Feature:** siehe Produktvision — `Text implements DiagramObject`
+  mit `parentObjectId`, neue ActionEvents (`AddText`/`UpdateText`/
+  `DeleteText`), Serialisierungserweiterung. UX gemäß „Entschiedene Fragen"
+  Nr. 4 (Platzhalter + Inline-Editor, ENTER/ESC). EINE Auswahl-Menge statt
+  demo2s zwei parallelen Sets.
+* **Persistenz/Serialisierung:** JSON-Format = demo2s Gson-Export (Beispiel:
+  `doc/spec.md`), plus `texts`; DTO an der Serialisierungsgrenze konvertiert
+  (`Circle.radius` ↔ width/height), Connections per `waypointIds`.
+* **Löschen:** Anforderung bestätigt (demo2). Kaskade siehe „Entschiedene
+  Fragen" Nr. 1 — `DeleteObjects`-Request, DiagramService publiziert alle
+  Entfernungen als explizite Fakten; eine Lösch-Geste = ein Undo-Punkt.
+
+### ✅ Entschiedene Fragen (beantwortet über die Altvorlage `../demo2`)
+
+1. **Löschen:** Kaskadierend — Objekt weg = externe Texte weg, Connections
+   weg (inkl. deren Waypoints), ID aus Waypoint-Listen anderer Connections
+   entfernen. Eine Lösch-Geste = ein Undo-Punkt (Composite).
+2. **Undo/Redo:** Ja, Anforderung. Pro Geste genau ein Command; Redo-Stack
+   leert sich bei neuer Aktion.
+3. **Move-Semantik:** Waypoints bleiben stehen; Connections folgen ihren
+   Endpunkt-IDs automatisch; externe Texte wandern mit — in demo3 als
+   eigener Fakt vom DiagramService publiziert (demo2 löste das versteckt in
+   der Registry — nicht kopieren).
+4. **Text-UX:** Klick erzeugt Platzhalter und öffnet sofort den
+   Inline-Editor; ENTER committet (nur bei Änderung ein Undo-Punkt), ESC
+   verwirft, Klick daneben committet; Doppelklick auf Text = erneut
+   editieren.
+5. **Mehrfachauswahl:** Ctrl+Klick = Toggle, Ctrl+Drag ins Leere =
+   Gummiband, einfacher Klick = Einzel-Auswahl (resettet die Menge).
+
+⚠️ Warnung aus demo2 (Verkrautungs-Beweis, NICHT kopieren): Kaskade und
+Undo-Wissen drifteten auseinander — Undo eines Objekt-Löschens verlor dort
+die mitgelöschten Texte dauerhaft, weil `DeleteObjectCommand` sie nicht
+mitgesichert hatte. Konsequenz für demo3: Kaskaden leben als sichtbare
+Fakten im DiagramService (einziger Schreibpfad); Commands bauen darauf auf
+und bauen Kaskade-Wissen nie doppelt nach.
 
 ---
 

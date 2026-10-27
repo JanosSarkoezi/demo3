@@ -1,6 +1,7 @@
 package de.fmc.editor.core.state.impl;
 
 import de.fmc.editor.core.event.ActionEvent;
+import de.fmc.editor.core.event.CustomKeyCode;
 import de.fmc.editor.core.event.CustomMouseButton;
 import de.fmc.editor.core.event.InputEvent;
 import de.fmc.editor.core.model.ToolType;
@@ -64,12 +65,17 @@ public final class IdleToolState extends BaseState {
             case SELECT, NONE -> this;
         });
 
-        // Shortcuts für Werkzeuge
-        addRule(InputEvent.KeyPressed.class, (e, c) -> switch (e.code()) {
-            case KEY_K -> new CircleToolState();
-            case KEY_R -> new RectangleToolState();
-            case KEY_C -> new ConnectToolState();
-            default -> this;
-        });
+        // Shortcuts für Werkzeuge — eine Guard-disjunkte Regel pro Key
+        // (kein default-Switch: der würde auf JEDES KeyPressed matchen und
+        // jede künftige Regel — z. B. ESC — zur Laufzeit ambig machen)
+        addRule(InputEvent.KeyPressed.class,
+                e -> e.code() == CustomKeyCode.KEY_K,
+                (e, c) -> new CircleToolState());
+        addRule(InputEvent.KeyPressed.class,
+                e -> e.code() == CustomKeyCode.KEY_R,
+                (e, c) -> new RectangleToolState());
+        addRule(InputEvent.KeyPressed.class,
+                e -> e.code() == CustomKeyCode.KEY_C,
+                (e, c) -> new ConnectToolState());
     }
 }
