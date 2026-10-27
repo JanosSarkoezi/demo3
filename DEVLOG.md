@@ -302,3 +302,53 @@ Chronik der Arbeitssessions. Format: Datum / Was / Warum so / Grenzen & Verbesse
   Nach-Zustand, Undo braucht zusätzlich den Vor-Zustand (Design in Block 3).
 - `mvn test`: 45/45 grün (33 + 8 `ClickSelectionTest` + 4 `DeleteObjectsTest`;
   `DiagramServiceTest` auf `waypointIds` + Objekt-Store umgestellt).
+
+## 27.10.2026 (5. Arbeitsblock) — Undo/Redo: Fakten-Inversion statt Command-Klassen
+
+**Was:**
+
+- „Meditations-Design" (mit dem User erarbeitete Session) umgesetzt: Undo ist
+  nur ein weiterer Schreiber über den Bus — CTRL+Z löst Requests aus, der
+  Schreibpfad bleibt einzeln.
+- Fakten mit Vor-Zustand angereichert: `ObjectMovedApplied(id, oldX, oldY,
+  newX, newY)`, `ObjectResizedApplied(previous, resized)`,
+  `ConnectionsUpdated(previous, updated)` (index-parallel).
+- Neue Requests: `MoveObjectTo` (absolut — präzises Inverse ohne Float-Drift,
+  denn a + (b-a) == b ist in IEEE754 nicht garantiert), `AddConnection`
+  (Restore mit Original-ID), `RemoveConnections` (ohne Kaskade — präzises
+  Inverse), `RequestUndo`/`RequestRedo` (UI übersetzt CTRL+Z/SHIFT+CTRL+Z
+  am Systemrand — semantisch wie Toolbar → SelectTool; funktioniert in
+  jedem Tool-Zustand ohne Regel-Duplizierung).
+- Neuer `UndoService` (Sitzungszustand analog SelectionService): leitet aus
+  Fakten mechanisch inverse Requests ab; Ops pro Gesten-Eintrag;
+  Move-Segmente desselben Objekts verschmelzen (erster Drag bleibt vom
+  Übergang konsumiert — bekannt); Gesten-Grenzen sind MousePressed/Released/
+  KeyPressed, MouseDragged bewusst NICHT (sonst zerfiele jede Move-Geste in
+  N Undo-Punkte); Replay-Guard verhindert Selbst-Erfassung; neue Aktion
+  leert den Redo-Stack. Undo = inverse Requests rückwärts, Redo = schlichtes
+  Replay der Original-Requests (Beantwortung der Meditations-Frage: JA, ein
+  normales `AddElement` genügt — kein „recreate" nötig).
+- Kaskaden-Undo gratis: Der Lösch-Eintrag besteht nur aus den Batch-Fakten,
+  das Undo-„Command" ist stumm. Genau dort starb demo2 (Undo verlor
+  mitgelöschte Texte) — hier strukturell ausgeschlossen.
+
+**Warum so:**
+
+- Fakten-Inversion statt Command-Klassen: Das Kaskade-Wissen liegt allein
+  im DiagramService (einziger Schreibpfad); der UndoService besitzt kein
+  Modellwissen und kann gegen ihn nie driften.
+- Enrichment statt Altbestand: Vor-Zustand IN den Fakt legen (Undo-Regel als
+  Typ-Invariante) statt Vor-Zustand in Commands zu spiegeln.
+
+**Grenzen & Verbesserungskandidaten:**
+
+- z-Order beim Restore: Wiedereingefügte Objekte landen oben in der
+  Einfüge-Reihenfolge (= z-Ordnung) — User hat eine Verbesserungsidee,
+  nächste Session besprechen.
+- Synthetische Abläufe ohne Eingabe-Grenzen verschmelzen zu einem
+  Undo-Punkt (Tests brauchen `closeGesture()`-Hilfe) — in echten Abläufen
+  liegen immer Eingaben zwischen Gesten.
+- `mvn test`: 53/53 grün (45 + 8 `UndoRedoTest`: Erstellen-Zyklus,
+  Move-Merging, Zwei-Gesten-Trennung, Kaskaden-Restore mit Original-IDs,
+  VerbindungsWith- Waypoint-Undo, Resize-Undo, Redo-Invalidierung,
+  Empty-History-No-Op).

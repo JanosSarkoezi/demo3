@@ -59,6 +59,9 @@ public class DiagramService implements DiagramQuery {
         bus.subscribe(ActionEvent.ResizeCircle.class, this::onResizeCircle);
         bus.subscribe(ActionEvent.CreateConnection.class, this::onCreateConnection);
         bus.subscribe(ActionEvent.DeleteObjects.class, this::onDeleteObjects);
+        bus.subscribe(ActionEvent.MoveObjectTo.class, this::onMoveObjectTo);
+        bus.subscribe(ActionEvent.AddConnection.class, this::onAddConnection);
+        bus.subscribe(ActionEvent.RemoveConnections.class, this::onRemoveConnections);
     }
 
     // ---------- Schreibpfad: ActionEvents (Requests) konsumieren ----------
@@ -73,9 +76,24 @@ public class DiagramService implements DiagramQuery {
         if (current == null) {
             return; // Unbekannte ID still ignorieren — kein Crash
         }
-        DiagramObject moved = moved(current, event.deltaX(), event.deltaY());
+        applyMove(current, current.x() + event.deltaX(), current.y() + event.deltaY());
+    }
+
+    /** Absolute Zielposition — das präzise Inverse für Undo (kein Float-Drift). */
+    private void onMoveObjectTo(ActionEvent.MoveObjectTo event) {
+        DiagramObject current = objects.get(event.id());
+        if (current == null) {
+            return;
+        }
+        applyMove(current, event.x(), event.y());
+    }
+
+    private void applyMove(DiagramObject current, double targetX, double targetY) {
+        double oldX = current.x();
+        double oldY = current.y();
+        DiagramObject moved = moved(current, targetX - oldX, targetY - oldY);
         objects.put(moved.id(), moved);
-        publishFact(new DiagramEvent.ObjectMovedApplied(moved.id(), moved.x(), moved.y()));
+        publishFact(new DiagramEvent.ObjectMovedApplied(moved.id(), oldX, oldY, moved.x(), moved.y()));
     }
 
     private void onResizeObject(ActionEvent.ResizeObject event) {
@@ -83,7 +101,7 @@ public class DiagramService implements DiagramQuery {
             Rectangle resized = new Rectangle(rectangle.id(), rectangle.x(), rectangle.y(),
                     event.newWidth(), event.newHeight(), rectangle.layerId());
             objects.put(resized.id(), resized);
-            publishFact(new DiagramEvent.ObjectResizedApplied(resized));
+            publishFact(new DiagramEvent.ObjectResizedApplied(rectangle, resized));
         }
         // Kein Rectangle (oder unbekannte ID) => kein Fakt, nichts passiert.
     }
@@ -93,7 +111,7 @@ public class DiagramService implements DiagramQuery {
             Circle resized = new Circle(circle.id(), circle.x(), circle.y(),
                     event.newRadius(), circle.layerId());
             objects.put(resized.id(), resized);
-            publishFact(new DiagramEvent.ObjectResizedApplied(resized));
+            publishFact(new DiagramEvent.ObjectResizedApplied(circle, resized));
         }
         // Kein Circle (oder unbekannte ID) => kein Fakt, nichts passiert.
     }
@@ -145,7 +163,8 @@ public class DiagramService implements DiagramQuery {
     private void onDeleteObjects(ActionEvent.DeleteObjects event) {
         List<DiagramObject> removedObjects = new ArrayList<>();
         List<Connection> removedConnections = new ArrayList<>();
-        LinkedHashMap<UUID, Connection> updatedConnections = new LinkedHashMap<>();
+        LinkedHashMap<UUID, Connection> updatedPrevious = new LinkedHashMap<>();
+        LinkedHashMap<UUID, Connection> updatedAfter = new LinkedHashMap<>();
 
         for (UUID id : event.ids()) {
             DiagramObject obj = objects.get(id);
@@ -159,17 +178,19 @@ public class DiagramService implements DiagramQuery {
                         .filter(conn -> id.equals(conn.sourceId()) || id.equals(conn.targetId()))
                         .toList();
                 for (Connection conn : attached) {
-                    removeConnectionCascade(conn, removedObjects, removedConnections, updatedConnections);
+                    removeConnectionCascade(conn, removedObjects, removedConnections,
+                            updatedPrevious, updatedAfter);
                 }
             }
-            removeObjectCascade(obj, removedObjects, updatedConnections);
+            removeObjectCascade(obj, removedObjects, updatedPrevious, updatedAfter);
         }
 
         if (!removedObjects.isEmpty()) {
             publishFact(new DiagramEvent.ObjectsRemoved(List.copyOf(removedObjects)));
         }
-        if (!updatedConnections.isEmpty()) {
-            publishFact(new DiagramEvent.ConnectionsUpdated(List.copyOf(updatedConnections.values())));
+        if (!updatedAfter.isEmpty()) {
+            publishFact(new DiagramEvent.ConnectionsUpdated(
+                    List.copyOf(updatedPrevious.values()), List.copyOf(updatedAfter.values())));
         }
         if (!removedConnections.isEmpty()) {
             publishFact(new DiagramEvent.ConnectionsRemoved(List.copyOf(removedConnections)));
@@ -179,7 +200,8 @@ public class DiagramService implements DiagramQuery {
     /** Entfernt eine Connection samt ihrer Waypoints und merkt alles für die Fakten vor. */
     private void removeConnectionCascade(Connection conn, List<DiagramObject> removedObjects,
                                          List<Connection> removedConnections,
-                                         LinkedHashMap<UUID, Connection> updatedConnections) {
+                                         LinkedHashMap<UUID, Connection> updatedPrevious,
+                                         LinkedHashMap<UUID, Connection> updatedAfter) {
         if (connections.remove(conn.id()) == null) {
             return; // Bereits in dieser Kaskade entfernt
         }
@@ -187,14 +209,15 @@ public class DiagramService implements DiagramQuery {
         for (UUID waypointId : conn.waypointIds()) {
             DiagramObject waypoint = objects.get(waypointId);
             if (waypoint != null) {
-                removeObjectCascade(waypoint, removedObjects, updatedConnections);
+                removeObjectCascade(waypoint, removedObjects, updatedPrevious, updatedAfter);
             }
         }
     }
 
     /** Entfernt das Objekt und streicht seine ID aus allen Waypoint-Listen. */
     private void removeObjectCascade(DiagramObject obj, List<DiagramObject> removedObjects,
-                                     LinkedHashMap<UUID, Connection> updatedConnections) {
+                                     LinkedHashMap<UUID, Connection> updatedPrevious,
+                                     LinkedHashMap<UUID, Connection> updatedAfter) {
         if (objects.remove(obj.id()) == null) {
             return; // Bereits in dieser Kaskade entfernt
         }
@@ -208,8 +231,30 @@ public class DiagramService implements DiagramQuery {
                 Connection pruned = new Connection(conn.id(), conn.sourceId(),
                         conn.targetId(), prunedIds, conn.layerId());
                 entry.setValue(pruned);
-                updatedConnections.put(pruned.id(), pruned);
+                // Nur beim ersten Strich den Original-Vor-Zustand sichern (Undo-Regel).
+                updatedPrevious.putIfAbsent(conn.id(), conn);
+                updatedAfter.put(pruned.id(), pruned);
             }
+        }
+    }
+
+    /** Stellt eine Connection mit ihrer ORIGINAL-ID wieder her (Undo des Löschens). */
+    private void onAddConnection(ActionEvent.AddConnection event) {
+        connections.put(event.connection().id(), event.connection());
+        publishFact(new DiagramEvent.ConnectionEstablished(event.connection()));
+    }
+
+    /** Entfernt NUR die genannten Connections — ohne Waypoint-Kaskade (präzises Inverse). */
+    private void onRemoveConnections(ActionEvent.RemoveConnections event) {
+        List<Connection> removed = new ArrayList<>();
+        for (UUID id : event.ids()) {
+            Connection conn = connections.remove(id);
+            if (conn != null) {
+                removed.add(conn);
+            }
+        }
+        if (!removed.isEmpty()) {
+            publishFact(new DiagramEvent.ConnectionsRemoved(List.copyOf(removed)));
         }
     }
 

@@ -112,13 +112,21 @@ class DiagramServiceTest {
                     assertThat(resized.id()).isEqualTo(rect.id());
                 });
         assertThat(resizedFacts).hasSize(1);
-        assertThat(resizedFacts.getFirst().resizedObject())
+        assertThat(resizedFacts.getFirst().resized())
                 .isInstanceOf(Rectangle.class)
                 .satisfies(obj -> {
                     Rectangle resized = (Rectangle) obj;
                     assertThat(resized.width()).isEqualTo(80.0);
                     assertThat(resized.height()).isEqualTo(50.0);
                     assertThat(resized.id()).isEqualTo(rect.id());
+                });
+        // Vor-Zustand macht den Fakt invertierbar (Undo-Regel):
+        assertThat(resizedFacts.getFirst().previous())
+                .isInstanceOf(Rectangle.class)
+                .satisfies(obj -> {
+                    Rectangle previous = (Rectangle) obj;
+                    assertThat(previous.width()).isEqualTo(40.0);
+                    assertThat(previous.height()).isEqualTo(30.0);
                 });
     }
 
@@ -139,7 +147,7 @@ class DiagramServiceTest {
                     assertThat(resized.y()).isEqualTo(200.0);
                 });
         assertThat(resizedFacts).hasSize(1);
-        assertThat(resizedFacts.getFirst().resizedObject())
+        assertThat(resizedFacts.getFirst().resized())
                 .isInstanceOf(Circle.class)
                 .satisfies(obj -> assertThat(((Circle) obj).radius()).isEqualTo(35.0));
     }

@@ -15,10 +15,11 @@ public sealed interface DiagramEvent extends DomainEvent {
 
     record ObjectAdded(DiagramObject object) implements DiagramEvent {}
 
-    record ObjectMovedApplied(UUID id, double newX, double newY) implements DiagramEvent {}
+    /** Trägt Vor- UND Nach-Position — der Vor-Zustand macht den Fakt invertierbar (Undo-Regel). */
+    record ObjectMovedApplied(UUID id, double oldX, double oldY, double newX, double newY) implements DiagramEvent {}
 
-    /** Trägt das geänderte Objekt (analog zu ObjectAdded) — Kreis & Rechteck teilen diesen Fakt. */
-    record ObjectResizedApplied(DiagramObject resizedObject) implements DiagramEvent {}
+    /** Trägt Vor- UND Nach-Zustand — der Vor-Zustand macht den Fakt invertierbar (Undo-Regel). */
+    record ObjectResizedApplied(DiagramObject previous, DiagramObject resized) implements DiagramEvent {}
 
     record ConnectionEstablished(Connection connection) implements DiagramEvent {}
 
@@ -34,6 +35,7 @@ public sealed interface DiagramEvent extends DomainEvent {
     /** Alle entfernten Connections mit vollständigem Zustand (Waypoint-IDs inklusive). */
     record ConnectionsRemoved(List<Connection> connections) implements DiagramEvent {}
 
-    /** Connections, deren Waypoint-Listen gestrichen wurden, die aber bestehen bleiben. */
-    record ConnectionsUpdated(List<Connection> connections) implements DiagramEvent {}
+    /** Bestehen gebliebene Connections, deren Waypoint-Listen gestrichen wurden —
+     *  previous und updated laufen index-parallel; previous macht den Fakt invertierbar. */
+    record ConnectionsUpdated(List<Connection> previous, List<Connection> updated) implements DiagramEvent {}
 }

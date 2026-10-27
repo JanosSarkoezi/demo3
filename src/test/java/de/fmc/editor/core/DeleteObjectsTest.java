@@ -126,9 +126,12 @@ class DeleteObjectsTest {
         assertThat(diagram.findById(shared.id())).isEmpty();
         // Und als Update-Fakt gemeldet, damit die spätere UI neu zeichnet:
         assertThat(connectionsUpdatedFacts).hasSize(1);
-        assertThat(connectionsUpdatedFacts.getFirst().connections())
+        assertThat(connectionsUpdatedFacts.getFirst().updated())
                 .extracting(Connection::id)
                 .containsExactly(surviving.id());
+        // Vor-Zustand macht den Fakt invertierbar (Undo-Regel):
+        assertThat(connectionsUpdatedFacts.getFirst().previous().getFirst().waypointIds())
+                .contains(shared.id());
         // Die zweite Connection hat überlebt:
         assertThat(diagram.findConnectionById(surviving.id())).isPresent();
     }

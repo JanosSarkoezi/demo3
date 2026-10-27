@@ -1,5 +1,6 @@
 package de.fmc.editor.core.event;
 
+import de.fmc.editor.core.model.Connection;
 import de.fmc.editor.core.model.DiagramObject;
 import de.fmc.editor.core.model.ToolType; // Enum: SELECT, CIRCLE, RECTANGLE, CONNECT
 import de.fmc.editor.core.model.Waypoint;
@@ -47,6 +48,10 @@ public sealed interface ActionEvent extends DomainEvent {
     record MoveObject(UUID id, double deltaX, double deltaY) implements ActionEvent {
     }
 
+    // Absolute Zielposition — das präzise Inverse für Undo (kein Float-Drift).
+    record MoveObjectTo(UUID id, double x, double y) implements ActionEvent {
+    }
+
     // Resize-Requests tragen NUR Maße, niemals Positionen: das Zentrum bleibt
     // damit garantiert erhalten (symmetrisches Resize um den Ankerpunkt).
     record ResizeObject(UUID id, double newWidth, double newHeight) implements ActionEvent {
@@ -56,5 +61,22 @@ public sealed interface ActionEvent extends DomainEvent {
     }
 
     record CreateConnection(UUID sourceId, UUID targetId, List<Waypoint> waypoints) implements ActionEvent {
+    }
+
+    // --- Restore-Anfragen (Inverse der Lösch-/Prune-Kaskade, Original-IDs) ---
+
+    /** Stellt eine Connection mit ihrer ORIGINAL-ID wieder her (Undo des Löschens). */
+    record AddConnection(Connection connection) implements ActionEvent {
+    }
+
+    /** Entfernt NUR die genannten Connections — ohne Waypoint-Kaskade (präzises Inverse). */
+    record RemoveConnections(List<UUID> ids) implements ActionEvent {
+    }
+
+    // --- Undo/Redo (UI übersetzt Shortcuts wie CTRL+Z / SHIFT+CTRL+Z hierher) ---
+    record RequestUndo() implements ActionEvent {
+    }
+
+    record RequestRedo() implements ActionEvent {
     }
 }

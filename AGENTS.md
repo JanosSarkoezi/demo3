@@ -88,18 +88,22 @@ drei Zweigen:
   `RequestCameraPan`, `SelectTool`, `SetSelection` (deklarative Auswahl-Menge,
   leer = abwählen), `AddElement` (fertiges Record inkl. UUID),
   `DeleteObjects` (zentrales Löschen inkl. Kaskade), `MoveObject`
-  (Delta in Welt-Koordinaten), `ResizeObject` / `ResizeCircle` (nur Maße —
+  (Delta in Welt-Koordinaten), `MoveObjectTo` (absolute Position —
+  Undo-Inverse ohne Float-Drift), `ResizeObject` / `ResizeCircle` (nur Maße —
   das Zentrum bleibt garantiert erhalten), `CreateConnection` (mit
   Waypoint-Liste — der Service speichert die Waypoints als Objekte und
-  referenziert sie per ID).
+  referenziert sie per ID), `AddConnection` (Restore mit Original-ID),
+  `RemoveConnections` (ohne Kaskade — präzises Inverse), `RequestUndo` /
+  `RequestRedo` (UI übersetzt CTRL+Z / SHIFT+CTRL+Z hierher).
 * **`DiagramEvent`** (Fakten von Diagram- & SelectionService): Antwort auf
-  Requests — `ObjectAdded`, `ObjectMovedApplied`, `ObjectResizedApplied`
-  (trägt das geänderte Objekt), `ConnectionEstablished`,
+  Requests — `ObjectAdded`, `ObjectMovedApplied` (Vor- UND Nach-Position),
+  `ObjectResizedApplied` (Vor- UND Nach-Zustand), `ConnectionEstablished`,
   `ConnectionRejected` (mit Begründung), `SelectionChanged`; plus
   Batch-Fakten einer Lösch-Geste mit vollständigem Zustand (Undo-Grundlage):
   `ObjectsRemoved` (inkl. kaskadierter Waypoints), `ConnectionsRemoved`,
-  `ConnectionsUpdated` (bestehen gebliebene mit gestrichenen Waypoint-Listen).
-  Daran dockt die spätere UI an.
+  `ConnectionsUpdated` (previous + updated index-parallel). **Design-Regel:
+  Ein Modell-Fakt ist genau dann undo-fähig, wenn er den vollständigen
+  Vor-Zustand trägt.** Daran dockt die spätere UI an.
 
 ### 3. `DiagramService` — zentrale Datenhalterung (core.service)
 Der `DiagramService` besitzt die Objekte und Verbindungen (LinkedHashMap,
@@ -118,6 +122,14 @@ Bus ↔ Service: `new DiagramService()` → `new InteractionEventBus(service, �
   (`core.model`). Auswahl ist Sitzungszustand, bewusst NICHT im DiagramService.
   Invariante „keine toten IDs": Der Service abonniert `ObjectsRemoved` und
   staubt gelöschte IDs automatisch heraus.
+* **`UndoService`** (`core.service`): Sitzungs-Undo/Redo über den Bus —
+  Undo ist nur ein weiterer Schreiber. Der Service leitet aus den Modell-
+  Fakten mechanisch inverse Requests ab (kein eigenes Kaskade-Wissen —
+  demo2-Lektion), sammelt Ops pro Gesten-Eintrag (MousePressed/Released/
+  KeyPressed sind Grenzen; MouseDragged bewusst nicht, damit Move-Segmente
+  verschmelzen), fährt einen Replay-Guard gegen Selbst-Erfassung und leert
+  den Redo-Stack bei neuen Aktionen. Kamera- und Auswahl-Fakten bleiben
+  bewusst draußen (Sitzungszustand, kein Modellinhalt).
 * **`GridSpec`** (`core.model`, Record): Grid-Größe in Welt-Koordinaten;
   `snapToGrid(...)` rundet auf den nächsten Schnittpunkt. Heute Referenz für
   Minimalgrößen (kleinstes Objekt = 1 Zelle); Move-Snapping später.
@@ -236,11 +248,13 @@ Beim Umsetzen dieser Features die obigen Goldenen Regeln einhalten:
 * **Weitere Validierung:** Neue Verbindungsregeln (Waypoint-Anzahl, Layer-Regeln
   u. ä.) als zusätzliche `ConnectionRule`s im `DiagramService` ergänzen —
   nie in den States.
-* **Undo/Redo:** Anforderung bestätigt (demo2: `CommandHistory` mit
-  execute/undo/redo; Redo-Stack leert sich bei neuer Aktion). Noch kein
-  Command-Pattern vorhanden. Bei Einführung: pro Geste genau ein Command —
-  Drag-Preview läuft über den Bus, niemals per direktem Service-Griff
-  (demo2-Krankheit: zwei Schreibpfade).
+* **Undo/Redo:** ✅ Core implementiert (`UndoService`, `RequestUndo`/
+  `RequestRedo` — die UI übersetzt CTRL+Z / SHIFT+CTRL+Z am Systemrand,
+  semantisch wie Toolbar → `SelectTool`). Fakten-basiert statt
+  Command-Klassen: Modell-Fakten tragen den Vor-Zustand, der Service leitet
+  inverse Requests mechanisch ab; pro Geste genau ein History-Punkt.
+  Offen: z-Order beim Restore (Wiedereinfügen landet oben in der
+  Einfüge-Reihenfolge — Verbesserungsidee des Users ausstehend), UI-Anbindung.
 * **Layer-System:** Records haben bereits `layerId` und `CameraInfo` ein
   `defaultLayerId` — aber es gibt keine `Layer`-Objekte und keine
   Sichtbarkeitssteuerung. *(Bestätigt durch spec.md: Sichtbarkeits-Steuerung,
