@@ -13,8 +13,12 @@ import de.fmc.editor.core.model.Waypoint;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 /**
  * Sitzungs-Undo/Redo über den Bus — Undo ist nur ein weiterer Schreiber.
@@ -48,11 +52,12 @@ public class UndoService {
 
     /** Eine undo-fähige Operation, abgeleitet aus einem Fakt (oder gemergten Fakten). */
     private sealed interface UndoOp permits AddedObject, AddedConnection, MovedObject,
-            ResizedObject, RemovedObjects, RemovedConnections, UpdatedConnections {}
+            MovedObjects, ResizedObject, RemovedObjects, RemovedConnections, UpdatedConnections {}
 
     private record AddedObject(DiagramObject object) implements UndoOp {}
     private record AddedConnection(Connection connection) implements UndoOp {}
     private record MovedObject(UUID id, double oldX, double oldY, double newX, double newY) implements UndoOp {}
+    private record MovedObjects(List<DiagramEvent.ObjectMoved> moves) implements UndoOp {}
     private record ResizedObject(DiagramObject previous, DiagramObject resized) implements UndoOp {}
     private record RemovedObjects(List<DiagramObject> objects, List<Integer> zIndices) implements UndoOp {}
     private record RemovedConnections(List<Connection> connections) implements UndoOp {}
@@ -76,8 +81,9 @@ public class UndoService {
 
         // Modell-ändernde Fakten → Ops
         bus.subscribe(DiagramEvent.ObjectAdded.class, fact -> record(new AddedObject(fact.object())));
-        bus.subscribe(DiagramEvent.ObjectMovedApplied.class, this::onMoved);
-        bus.subscribe(DiagramEvent.ObjectResizedApplied.class,
+        bus.subscribe(DiagramEvent.ObjectMoved.class, this::onMoved);
+        bus.subscribe(DiagramEvent.ObjectsMoved.class, this::onMovedBatch);
+        bus.subscribe(DiagramEvent.ObjectResized.class,
                 fact -> record(new ResizedObject(fact.previous(), fact.resized())));
         bus.subscribe(DiagramEvent.ConnectionEstablished.class,
                 fact -> record(new AddedConnection(fact.connection())));
@@ -123,7 +129,7 @@ public class UndoService {
         pending.add(op);
     }
 
-    private void onMoved(DiagramEvent.ObjectMovedApplied fact) {
+    private void onMoved(DiagramEvent.ObjectMoved fact) {
         if (replaying) {
             return;
         }
@@ -136,6 +142,49 @@ public class UndoService {
             return;
         }
         record(new MovedObject(fact.id(), fact.oldX(), fact.oldY(), fact.newX(), fact.newY()));
+    }
+
+    private void onMovedBatch(DiagramEvent.ObjectsMoved fact) {
+        if (replaying) {
+            return;
+        }
+        // Merge: aufeinanderfolgende Batch-Moves derselben ID-Menge sind
+        // EINE Geste (je ID: Vor-Position aus dem ersten, Nach-Position aus
+        // dem letzten Segment).
+        if (!pending.isEmpty() && pending.getLast() instanceof MovedObjects last
+                && sameIds(last.moves(), fact.movedObjects())) {
+            redoStack.clear();
+            pending.set(pending.size() - 1,
+                    new MovedObjects(mergeMoves(last.moves(), fact.movedObjects())));
+            return;
+        }
+        record(new MovedObjects(fact.movedObjects()));
+    }
+
+    private boolean sameIds(List<DiagramEvent.ObjectMoved> a,
+                            List<DiagramEvent.ObjectMoved> b) {
+        return idsOf(a).equals(idsOf(b));
+    }
+
+    private Set<UUID> idsOf(List<DiagramEvent.ObjectMoved> moves) {
+        return moves.stream()
+                .map(DiagramEvent.ObjectMoved::id)
+                .collect(Collectors.toSet());
+    }
+
+    private List<DiagramEvent.ObjectMoved> mergeMoves(List<DiagramEvent.ObjectMoved> first,
+                                                             List<DiagramEvent.ObjectMoved> next) {
+        Map<UUID, DiagramEvent.ObjectMoved> origins = new LinkedHashMap<>();
+        for (DiagramEvent.ObjectMoved move : first) {
+            origins.putIfAbsent(move.id(), move);
+        }
+        List<DiagramEvent.ObjectMoved> merged = new ArrayList<>();
+        for (DiagramEvent.ObjectMoved move : next) {
+            DiagramEvent.ObjectMoved origin = origins.get(move.id());
+            merged.add(new DiagramEvent.ObjectMoved(
+                    move.id(), origin.oldX(), origin.oldY(), move.newX(), move.newY()));
+        }
+        return merged;
     }
 
     // ---------- Undo / Redo ----------
@@ -180,6 +229,12 @@ public class UndoService {
             case AddedConnection added -> bus.publish(
                     new ActionEvent.RemoveConnections(List.of(added.connection().id())));
             case MovedObject move -> bus.publish(new ActionEvent.MoveObjectTo(move.id(), move.oldX(), move.oldY()));
+            case MovedObjects moves -> {
+                for (int i = moves.moves().size() - 1; i >= 0; i--) {
+                    DiagramEvent.ObjectMoved move = moves.moves().get(i);
+                    bus.publish(new ActionEvent.MoveObjectTo(move.id(), move.oldX(), move.oldY()));
+                }
+            }
             case ResizedObject resize -> bus.publish(resizeRequest(resize.previous()));
             case RemovedObjects removed -> bus.publish(
                     new ActionEvent.RestoreObjects(removed.objects(), removed.zIndices()));
@@ -196,6 +251,11 @@ public class UndoService {
             case AddedObject added -> bus.publish(new ActionEvent.AddElement(added.object()));
             case AddedConnection added -> bus.publish(new ActionEvent.AddConnection(added.connection()));
             case MovedObject move -> bus.publish(new ActionEvent.MoveObjectTo(move.id(), move.newX(), move.newY()));
+            case MovedObjects moves -> {
+                for (DiagramEvent.ObjectMoved move : moves.moves()) {
+                    bus.publish(new ActionEvent.MoveObjectTo(move.id(), move.newX(), move.newY()));
+                }
+            }
             case ResizedObject resize -> bus.publish(resizeRequest(resize.resized()));
             case RemovedObjects removed -> bus.publish(new ActionEvent.DeleteObjects(
                     removed.objects().stream().map(DiagramObject::id).toList()));

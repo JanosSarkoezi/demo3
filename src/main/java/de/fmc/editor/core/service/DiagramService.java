@@ -72,6 +72,7 @@ public class DiagramService implements DiagramQuery {
         bus.subscribe(ActionEvent.DeleteObjects.class, this::onDeleteObjects);
         bus.subscribe(ActionEvent.RestoreObjects.class, this::onRestoreObjects);
         bus.subscribe(ActionEvent.MoveObjectTo.class, this::onMoveObjectTo);
+        bus.subscribe(ActionEvent.MoveObjects.class, this::onMoveObjects);
         bus.subscribe(ActionEvent.AddConnection.class, this::onAddConnection);
         bus.subscribe(ActionEvent.RemoveConnections.class, this::onRemoveConnections);
     }
@@ -108,12 +109,31 @@ public class DiagramService implements DiagramQuery {
         applyMove(current, event.x(), event.y());
     }
 
+    /** Gruppenverschiebung: EIN Batch-Fakt pro Segment, egal wie viele Objekte. */
+    private void onMoveObjects(ActionEvent.MoveObjects event) {
+        List<DiagramEvent.ObjectMoved> applied = new ArrayList<>();
+        for (UUID id : event.ids()) {
+            DiagramObject current = objects.get(id);
+            if (current == null) {
+                continue; // Unbekannte ID still ignorieren — kein Crash
+            }
+            double oldX = current.x();
+            double oldY = current.y();
+            DiagramObject moved = moved(current, event.deltaX(), event.deltaY());
+            objects.put(id, moved);
+            applied.add(new DiagramEvent.ObjectMoved(id, oldX, oldY, moved.x(), moved.y()));
+        }
+        if (!applied.isEmpty()) {
+            publishFact(new DiagramEvent.ObjectsMoved(List.copyOf(applied)));
+        }
+    }
+
     private void applyMove(DiagramObject current, double targetX, double targetY) {
         double oldX = current.x();
         double oldY = current.y();
         DiagramObject moved = moved(current, targetX - oldX, targetY - oldY);
         objects.put(moved.id(), moved);
-        publishFact(new DiagramEvent.ObjectMovedApplied(moved.id(), oldX, oldY, moved.x(), moved.y()));
+        publishFact(new DiagramEvent.ObjectMoved(moved.id(), oldX, oldY, moved.x(), moved.y()));
     }
 
     private void onResizeObject(ActionEvent.ResizeObject event) {
@@ -121,7 +141,7 @@ public class DiagramService implements DiagramQuery {
             Rectangle resized = new Rectangle(rectangle.id(), rectangle.x(), rectangle.y(),
                     event.newWidth(), event.newHeight(), rectangle.layerId());
             objects.put(resized.id(), resized);
-            publishFact(new DiagramEvent.ObjectResizedApplied(rectangle, resized));
+            publishFact(new DiagramEvent.ObjectResized(rectangle, resized));
         }
         // Kein Rectangle (oder unbekannte ID) => kein Fakt, nichts passiert.
     }
@@ -131,7 +151,7 @@ public class DiagramService implements DiagramQuery {
             Circle resized = new Circle(circle.id(), circle.x(), circle.y(),
                     event.newRadius(), circle.layerId());
             objects.put(resized.id(), resized);
-            publishFact(new DiagramEvent.ObjectResizedApplied(circle, resized));
+            publishFact(new DiagramEvent.ObjectResized(circle, resized));
         }
         // Kein Circle (oder unbekannte ID) => kein Fakt, nichts passiert.
     }
@@ -332,6 +352,26 @@ public class DiagramService implements DiagramQuery {
         return Optional.ofNullable(objects.get(id));
     }
 
+    /**
+     * Liefert alle Objekte, deren Bounding-Box das Welt-Rechteck schneidet —
+     * in z-Ordnung (unten -> oben, deterministisch). Waypoints sind keine
+     * Band-Ziele, solange sie keine Klick-Ziele sind (Layer-Sichtbarkeit fehlt).
+     */
+    @Override
+    public List<DiagramObject> findObjectsInBounds(double minX, double minY, double maxX, double maxY) {
+        List<DiagramObject> result = new ArrayList<>();
+        for (UUID id : zOrder) {
+            DiagramObject obj = objects.get(id);
+            if (obj == null || obj instanceof Waypoint) {
+                continue;
+            }
+            if (boundsIntersect(obj, minX, minY, maxX, maxY)) {
+                result.add(obj);
+            }
+        }
+        return result;
+    }
+
     public Optional<Connection> findConnectionById(UUID id) {
         return Optional.ofNullable(connections.get(id));
     }
@@ -364,6 +404,17 @@ public class DiagramService implements DiagramQuery {
             case Rectangle r -> Math.abs(worldX - r.x()) <= r.width() / 2
                              && Math.abs(worldY - r.y()) <= r.height() / 2;
             case Waypoint w  -> Math.hypot(worldX - w.x(), worldY - w.y()) <= 5.0;
+        };
+    }
+
+    /** Bounding-Box-Schnitt für die Gummiband-Auswahl (x/y ist das Zentrum). */
+    private boolean boundsIntersect(DiagramObject obj, double minX, double minY, double maxX, double maxY) {
+        return switch (obj) {
+            case Circle c    -> c.x() + c.radius() >= minX && c.x() - c.radius() <= maxX
+                             && c.y() + c.radius() >= minY && c.y() - c.radius() <= maxY;
+            case Rectangle r -> r.x() + r.width() / 2 >= minX && r.x() - r.width() / 2 <= maxX
+                             && r.y() + r.height() / 2 >= minY && r.y() - r.height() / 2 <= maxY;
+            case Waypoint w  -> false; // oben gefiltert — der Vollständigkeit halber
         };
     }
 

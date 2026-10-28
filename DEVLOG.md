@@ -395,3 +395,111 @@ Chronik der Arbeitssessions. Format: Datum / Was / Warum so / Grenzen & Verbesse
 - `mvn test`: 56/56 grün (53 + 3 `ZOrderRestoreTest`: Mittel-Position-
   Restore inkl. Hit-Test-Beweis, Kaskaden-Restore mit Waypoint,
   Multi-Delete mit Index-Snapshot).
+
+## 28.10.2026 (1. Arbeitsblock) — Gummiband-Auswahl (Ctrl+Leerraum-Drag)
+
+**Was:**
+
+- `DiagramQuery.findObjectsInBounds(minX, minY, maxX, maxY)` — neue Lese-Query
+  (Bounding-Box-Schnitt, Waypoints ausgenommen, z-Ordnungs-determiniert);
+  als Default-Methode im Interface, damit die sechs Test-Stubs stumm bleiben;
+  der DiagramService überschreibt sie echt.
+- Neue `PendingBoxSelectState`: Ctrl+Leerraum-Press → stumm bis zum Release
+  (das sichtbare Rechteck ist reine UI-Sache — Commit-on-Release wie bei
+  Resize/Move) → beim Loslassen Welt-Rechteck via Kamera berechnen,
+  `findObjectsInBounds` fragen, EIN deklaratives `SetSelection` publizieren
+  (das Band ersetzt die Auswahl, demo2-Semantik). Ctrl+Klick ohne Drag =
+  No-Op; ESC = Abbruch ohne Event.
+- `IdleToolState`: Ctrl-Zweig bei Leerraum-Press. Normales Leerraum-Drag
+  bleibt Panning (bewusst so entschieden — demo2-Semantik).
+- `DRAG_THRESHOLD_PIXELS` nach `BaseState` zentralisiert — eine Konstante
+  statt drei Kopien (PendingMove, PendingCreateOrPan, BoxSelect).
+
+**Warum so:**
+
+- EIN Event statt Koordinaten-Strom (User-Frage aus der Planungs-Session,
+  gemeinsam entschieden): Welche Objekte im Band liegen, ist eine
+  Lese-Operation (Goldene Regel 1 — States lesen via Query); die fertige
+  Menge ist die Absicht. `SetSelection` wurde dafür seit Tag 1 gebaut
+  („Gummiband konvergiert im State, braucht nie neue Event-Typen").
+- Default-Methode statt sechs Stub-Anpassungen: Interface-Wachstum ohne
+  Bestands-Bruch; der echte Implementierer überschreibt explizit.
+
+**Grenzen & Verbesserungskandidaten:**
+
+- Additives Band (z. B. Shift+Ctrl+Drag) ist nicht umgesetzt — das Band
+  ersetzt immer (demo2-Semantik); bei Bedarf später als kleine Erweiterung.
+- Waypoints bleiben band-seitig unsichtbar bis zur Layer-Sichtbarkeit
+  (konsistent mit `findTopmostAt`).
+- Das sichtbare Rechteck selbst kommt mit dem UI-Meilenstein (die UI ist der
+  Ursprung der Maus-Events und kann lokal zeichnen; alternativ Preview-Events
+  — Entscheidung dort, wie bei ConnectingState notiert).
+- `mvn test`: 64/64 grün (56 + 8 `BoxSelectionTest`: Band-Treffer in
+  z-Ordnung, Leere-Band-Reset, Ctrl-Klick-No-Op, ESC-Abbruch,
+  Pan-Regression, Kamera-Welt-Rechnung, Band+DEL-Sammellöschen,
+  Waypoint-Ausschluss).
+
+## 28.10.2026 (2. Arbeitsblock) — Gruppen-Move: Multi-Select komplett
+
+**Was:**
+
+- Pluraler Request `MoveObjects(ids, deltaX, deltaY)` + Batch-Fakt
+  `ObjectsMovedApplied` (ein Eintrag je Objekt mit Vor-/Nach-Position).
+- `MovingState`/`PendingMoveState` auf ID-Mengen umgestellt; die Geste
+  spricht IMMER den pluralen Request (n=1 ist der Spezialfall) — der
+  Service publiziert EINEN Batch-Fakt pro Drag-Segment.
+- `IdleToolState`: Plain-Press auf bereits Selektiertes kollabiert die
+  Auswahl nicht mehr — die Geste verschiebt die ganze Menge. Ctrl-Toggle-out
+  zieht nur das Ziel selbst.
+- `SelectionService` deduped identische Mengen (kein Fakten-Rauschen; der
+  Plain-Press auf ein Gruppenmitglied ist auch akustisch kein Auswahlwechsel).
+- `UndoService`: neuer `MovedObjects`-Op mit Mengen-Merge — aufeinander-
+  folgende Batch-Moves derselben ID-Menge verschmelzen zu EINEM Undo-Punkt
+  (je ID: Vor-Position aus dem ersten, Nach-Position aus dem letzten Segment).
+
+**Warum so:**
+
+- Immer plural: ein Gesten-Pfad statt zweien; der Batch-Fakt hält den
+  Fakten-Strom flach (1 pro Segment statt n) und das Undo-Merge simpel.
+- Der Kollaps-Schutz war der letzte Baustein der entschiedenen Semantik:
+  Erst „Press selektiert", dann „Press auf Selektiertes erhält die Menge" —
+  damit ist Drag-Interaktion mit Mehrfachauswahl vollständig.
+
+**Grenzen & Verbesserungskandidaten:**
+
+- Move-Snapping (spec.md) fehlt noch: Gruppen-Snap auf das primär gezogene
+  Objekt, Gruppe folgt dem Delta (demo2-Semantik, in AGENTS.md vermerkt).
+- Der singuläre `MoveObject`-Request hat keinen Produzenten mehr (die Geste
+  spricht plural) — bleibt als Service-API für Tests/direkte Aufrufer.
+- `mvn test`: 70/70 grün (64 + 6 `GroupMoveTest`: Gruppen-Move, Einzel-
+  Kollaps, kein SelectionChanged bei Plain-Press auf Selektiertes,
+  Toggle-out-Einzelzug, Ein-Undo-pro-Gruppengeste inkl. Redo,
+  Unknown-ID-Ignore).
+
+## 28.10.2026 (3. Arbeitsblock) — Namenskonvention: Fakten im schlichten Präteritum
+
+**Was:**
+
+- `ObjectMovedApplied` → `ObjectMoved`, `ObjectResizedApplied` →
+  `ObjectResized`, `ObjectsMovedApplied` → `ObjectsMoved` umbenannt
+  (betroffen: DiagramEvent, DiagramService, UndoService, DiagramServiceTest;
+  35 Referenzen, rein mechanisch, Verhalten unverändert).
+- Namensregel in AGENTS.md Abschnitt 2 dokumentiert: Requests imperativ,
+  Fakten schlichtes Präteritum, keine „Applied"-Suffixe; Add/Create-
+  Verb-Familien bewusst verschieden (fertiges Record einfügen inkl.
+  Restore-Pfad vs. neue Connection mit frischer ID erzeugen).
+
+**Warum so:**
+
+- User-Infragestellung zu Recht: „Applied" war seit Tag 1 inkonsequent
+  (`ObjectAdded` hatte es nie) und redundant — die Zugehörigkeit zur
+  DiagramEvent-Familie kodiert „vollzogen" bereits. CQRS-Konvention ist
+  schlichtes Präteritum („OrderShipped", nicht „OrderShippedApplied").
+- Umbenennen jetzt ist kostenlos (noch keine UI, das künftige JSON-Format
+  hängt nicht an Klassennamen); nach dem UI-Bau würde es teuer.
+
+**Grenzen:**
+
+- Die DEVLOG-Chronik behält historisch bedingte alte Namen (Chronik wird
+  nicht umgeschrieben).
+- `mvn test`: 70/70 grün — reines Refactoring ohne Verhaltensänderung.

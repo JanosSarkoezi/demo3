@@ -13,8 +13,6 @@ import java.util.UUID;
 
 public final class PendingCreateOrPanState extends BaseState {
 
-    private static final double DRAG_THRESHOLD_PIXELS = 4.0;
-
     private final double startScreenX;
     private final double startScreenY;
     private final ToolType activeTool;

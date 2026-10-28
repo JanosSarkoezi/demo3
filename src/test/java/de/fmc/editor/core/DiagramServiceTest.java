@@ -33,8 +33,8 @@ class DiagramServiceTest {
 
     private final List<DiagramEvent.ConnectionRejected> rejections = new ArrayList<>();
     private final List<DiagramEvent.ConnectionEstablished> established = new ArrayList<>();
-    private final List<DiagramEvent.ObjectMovedApplied> movedFacts = new ArrayList<>();
-    private final List<DiagramEvent.ObjectResizedApplied> resizedFacts = new ArrayList<>();
+    private final List<DiagramEvent.ObjectMoved> movedFacts = new ArrayList<>();
+    private final List<DiagramEvent.ObjectResized> resizedFacts = new ArrayList<>();
 
     @BeforeEach
     void setUp() {
@@ -51,8 +51,8 @@ class DiagramServiceTest {
 
         bus.subscribe(DiagramEvent.ConnectionRejected.class, rejections::add);
         bus.subscribe(DiagramEvent.ConnectionEstablished.class, established::add);
-        bus.subscribe(DiagramEvent.ObjectMovedApplied.class, movedFacts::add);
-        bus.subscribe(DiagramEvent.ObjectResizedApplied.class, resizedFacts::add);
+        bus.subscribe(DiagramEvent.ObjectMoved.class, movedFacts::add);
+        bus.subscribe(DiagramEvent.ObjectResized.class, resizedFacts::add);
     }
 
     private Circle newCircle(double x, double y) {
@@ -71,7 +71,7 @@ class DiagramServiceTest {
     }
 
     @Test
-    @DisplayName("MoveObject verschiebt das Objekt und feuert den ObjectMovedApplied-Fakt")
+    @DisplayName("MoveObject verschiebt das Objekt und feuert den ObjectMoved-Fakt")
     void shouldMoveObject() {
         Circle circle = newCircle(150.0, 200.0);
         bus.publish(new ActionEvent.AddElement(circle));
@@ -96,7 +96,7 @@ class DiagramServiceTest {
     }
 
     @Test
-    @DisplayName("ResizeObject ändert die Maße und feuert den ObjectResizedApplied-Fakt")
+    @DisplayName("ResizeObject ändert die Maße und feuert den ObjectResized-Fakt")
     void shouldResizeRectangle() {
         Rectangle rect = new Rectangle(UUID.randomUUID(), 50.0, 60.0, 40.0, 30.0, defaultLayerId);
         bus.publish(new ActionEvent.AddElement(rect));

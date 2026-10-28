@@ -89,21 +89,33 @@ drei Zweigen:
   leer = abwählen), `AddElement` (fertiges Record inkl. UUID),
   `DeleteObjects` (zentrales Löschen inkl. Kaskade), `MoveObject`
   (Delta in Welt-Koordinaten), `MoveObjectTo` (absolute Position —
-  Undo-Inverse ohne Float-Drift), `ResizeObject` / `ResizeCircle` (nur Maße —
+  Undo-Inverse ohne Float-Drift), `MoveObjects` (Gruppen-Delta; die Geste
+  nutzt immer den pluralen Request, n=1 ist der Spezialfall),
+  `ResizeObject` / `ResizeCircle` (nur Maße —
   das Zentrum bleibt garantiert erhalten), `CreateConnection` (mit
   Waypoint-Liste — der Service speichert die Waypoints als Objekte und
   referenziert sie per ID), `AddConnection` (Restore mit Original-ID),
   `RemoveConnections` (ohne Kaskade — präzises Inverse), `RequestUndo` /
   `RequestRedo` (UI übersetzt CTRL+Z / SHIFT+CTRL+Z hierher).
 * **`DiagramEvent`** (Fakten von Diagram- & SelectionService): Antwort auf
-  Requests — `ObjectAdded`, `ObjectMovedApplied` (Vor- UND Nach-Position),
-  `ObjectResizedApplied` (Vor- UND Nach-Zustand), `ConnectionEstablished`,
+  Requests — `ObjectAdded`, `ObjectMoved` (Vor- UND Nach-Position),
+  `ObjectsMoved` (Batch: ein Eintrag je Objekt einer Gruppenverschiebung),
+  `ObjectResized` (Vor- UND Nach-Zustand), `ConnectionEstablished`,
   `ConnectionRejected` (mit Begründung), `SelectionChanged`; plus
   Batch-Fakten einer Lösch-Geste mit vollständigem Zustand (Undo-Grundlage):
   `ObjectsRemoved` (inkl. kaskadierter Waypoints), `ConnectionsRemoved`,
   `ConnectionsUpdated` (previous + updated index-parallel). **Design-Regel:
   Ein Modell-Fakt ist genau dann undo-fähig, wenn er den vollständigen
   Vor-Zustand trägt.** Daran dockt die spätere UI an.
+
+**Namenskonvention:** Requests im Imperativ, Verb zuerst (`AddElement`,
+`MoveObject`) — Fakten im schlichten Präteritum, Subjekt zuerst
+(`ObjectAdded`, `ObjectMoved`, `ConnectionEstablished`). Keine Suffixe wie
+„Applied": Dass ein Fakt vollzogen ist, trägt seine Zugehörigkeit zur
+DiagramEvent-Familie bereits selbst. Die Verb-Familien Add und Create sind
+bewusst verschieden: `AddElement` fügt ein fertiges Record ein (Restore-Pfad
+inklusive), `CreateConnection` prüft und erzeugt eine NEUE Connection mit
+frischer ID.
 
 ### 3. `DiagramService` — zentrale Datenhalterung (core.service)
 Der `DiagramService` speichert Objekte als Zwei-Struktur-Kombination
@@ -127,7 +139,9 @@ Bus ↔ Service: `new DiagramService()` → `new InteractionEventBus(service, �
   Bestätigung als `SelectionChanged`-Fakt; read-only-Sicht: `SelectionQuery`
   (`core.model`). Auswahl ist Sitzungszustand, bewusst NICHT im DiagramService.
   Invariante „keine toten IDs": Der Service abonniert `ObjectsRemoved` und
-  staubt gelöschte IDs automatisch heraus.
+  staubt gelöschte IDs automatisch heraus. Identische Mengen feuern KEINEN
+  Fakt (Plain-Press auf bereits Selektiertes kollabiert die Auswahl nicht
+  und rauscht nicht).
 * **`UndoService`** (`core.service`): Sitzungs-Undo/Redo über den Bus —
   Undo ist nur ein weiterer Schreiber. Der Service leitet aus den Modell-
   Fakten mechanisch inverse Requests ab (kein eigenes Kaskade-Wissen —
@@ -186,19 +200,22 @@ ein `BaseStateTest` beweist die Invariante direkt. Konsequenzen:
   Doppelklick → `ResizeModeState`),
   `CircleToolState` / `RectangleToolState` / `ConnectToolState`,
   `PendingCreateOrPanState` (Klick-oder-Drag-Entscheidung), `MovingState`,
-  `PendingMoveState`, `ConnectingState` (Waypoints sammeln, ESC bricht ab),
+  `PendingMoveState`, `PendingBoxSelectState` (Gummiband: Ctrl+Leerraum-Drag,
+  stumm bis zum Release, EIN `SetSelection`), `ConnectingState` (Waypoints sammeln, ESC bricht ab),
   `ResizeModeState` (Auswahl + Handles, Griff-Hit-Test) und
   `HandleDragState` (Resize-Geste: intern sammeln, Commit beim Loslassen).
 * **Kamera-States**: `CameraIdleState`, `CameraPanningState`
   (`isActive() = true` signalisiert dem Bus die Tool-Pause).
 
 ### 7. Gesten-Erkennung (Schutz vor Event-Flut)
-* **Drag-Schwellenwert** `DRAG_THRESHOLD_PIXELS = 4.0`: Erst ab Überschreiten
-  entscheidet sich Klick vs. Drag/Pan (`PendingMoveState`,
-  `PendingCreateOrPanState`).
+* **Drag-Schwellenwert** `DRAG_THRESHOLD_PIXELS = 4.0` (zentral in `BaseState`):
+  Erst ab Überschreiten entscheidet sich Klick vs. Drag/Pan/Gummiband
+  (`PendingMoveState`, `PendingCreateOrPanState`, `PendingBoxSelectState`).
 * **Move: inkrementelle Deltas pro Drag-Segment:** `MovingState` feuert pro
-  `MouseDragged` ein Delta seit der letzten Position; der DiagramService
-  addiert zur absoluten Position. Der erste Drag-Event einer Geste wird vom
+  `MouseDragged` ein Delta seit der letzten Position — immer als pluraler
+  `MoveObjects`-Request (n=1 ist der Spezialfall); der DiagramService
+  addiert zur absoluten Position und publiziert EINEN `ObjectsMoved`-
+  Batch-Fakt pro Segment. Der erste Drag-Event einer Geste wird vom
   `PendingMoveState`-Übergang konsumiert.
 * **Resize: Commit erst beim Loslassen:** `HandleDragState` publiziert
   während des Ziehens nichts (Live-Vorschau ist reine UI-Sache) und feuert
@@ -274,14 +291,6 @@ Beim Umsetzen dieser Features die obigen Goldenen Regeln einhalten:
   blendet den Wegpunkt-Layer ein, Drag ins Leere wieder aus. Genau hier
   kehrt das am 27.10. entfernte `AddWaypoint`-Event als Request zurück
   (damals tot — jetzt mit echtem Anwendungsfall).
-* **Mehrfachauswahl:** Infrastruktur steht (`SelectionService`, `SetSelection`,
-  `SelectionChanged`). Offen bleibt der plurale `MoveObjects`-Request.
-  Resize-Handles sind nur bei genau einem ausgewählten Objekt sinnvoll.
-  *(Selektion bei Maus-Druck ist implementiert: einfacher Klick = exklusiv,
-  Ctrl+Klick = Toggle (`controlDown`-Flag am `InputEvent.MousePressed`,
-  dient später auch dem Gummiband), Leere-Klick / ESC = leeren. Noch offen:
-  Gummiband als eigener Pending-State und Gruppen-Move über den pluralen
-  `MoveObjects`-Request.)*
 * **Move-Snapping:** spec.md fordert Grid-Snapping beim Verschieben.
   `GridSpec.snapToGrid(...)` existiert, muss in den Move-Pfad integriert
   werden. Demo2-Semantik: Zielposition des primär gezogenen Objekts snappen,
@@ -315,7 +324,8 @@ Beim Umsetzen dieser Features die obigen Goldenen Regeln einhalten:
    Loslassen): einfacher Klick = exklusive Auswahl (ersetzt die bisherige),
    Ctrl+Klick = Objekt zusätzlich aufnehmen bzw. bei bereits Selektiertem
    wieder herausnehmen (Toggle), Klick auf leere Fläche / ESC = Auswahl
-   leeren. Gummiband (Ctrl+Drag) und Gruppen-Move folgen später.
+   leeren. Gummiband: Ctrl+Leerraum-Drag (implementiert). Gruppen-Move:
+   Plain-Press auf Selektiertes verschiebt die Menge (implementiert).
    Löschen: ausschließlich DEL-Taste auf die aktuelle Auswahl.
 
 ⚠️ Warnung aus demo2 (Verkrautungs-Beweis, NICHT kopieren): Kaskade und

@@ -57,6 +57,11 @@ public sealed interface ActionEvent extends DomainEvent {
     record MoveObjectTo(UUID id, double x, double y) implements ActionEvent {
     }
 
+    /** Gruppenverschiebung: dasselbe Delta für alle genannten Objekte
+     *  (inkrementell pro Drag-Segment, analog MoveObject). */
+    record MoveObjects(List<UUID> ids, double deltaX, double deltaY) implements ActionEvent {
+    }
+
     // Resize-Requests tragen NUR Maße, niemals Positionen: das Zentrum bleibt
     // damit garantiert erhalten (symmetrisches Resize um den Ankerpunkt).
     record ResizeObject(UUID id, double newWidth, double newHeight) implements ActionEvent {

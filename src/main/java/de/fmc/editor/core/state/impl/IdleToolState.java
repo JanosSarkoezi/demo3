@@ -42,13 +42,21 @@ public final class IdleToolState extends BaseState {
 
                     var target = c.diagram().findTopmostAt(worldX, worldY);
                     if (target.isEmpty()) {
+                        if (e.controlDown()) {
+                            // Ctrl+Klick ins Leere -> Gummiband vorbereiten.
+                            // Kein Event: Die Auswahl bleibt bis zum Band-Ergebnis
+                            // unverändert; ein Ctrl-Klick ohne Drag ist ein No-Op.
+                            return new PendingBoxSelectState(e.x(), e.y());
+                        }
                         // Klick ins Leere -> Auswahl aufheben; kann Drag/Pan werden
                         c.publisher().publish(new ActionEvent.SetSelection(List.of()));
                         return new PendingCreateOrPanState(e.x(), e.y(), ToolType.SELECT);
                     }
 
                     // Selektion bei Maus-Druck: einfacher Klick = exklusiv,
-                    // Ctrl+Klick = Toggle (bereits Selektiertes fliegt raus).
+                    // Ctrl+Klick = Toggle. Plain-Press auf bereits Selektiertes
+                    // kollabiert die Auswahl NICHT — die Geste verschiebt die
+                    // ganze Menge (Gruppen-Move).
                     UUID targetId = target.get().id();
                     List<UUID> current = c.selection().selectedIds();
                     List<UUID> newSelection;
@@ -58,13 +66,21 @@ public final class IdleToolState extends BaseState {
                         if (!current.contains(targetId)) {
                             newSelection.add(targetId);
                         }
+                    } else if (current.contains(targetId)) {
+                        newSelection = current;
                     } else {
                         newSelection = List.of(targetId);
                     }
                     c.publisher().publish(new ActionEvent.SetSelection(newSelection));
 
+                    // Verschiebe-Menge: die Auswahl, sofern sie das Ziel enthält
+                    // (Ctrl-Toggle-out zieht nur das Ziel selbst).
+                    List<UUID> movingIds = newSelection.contains(targetId)
+                            ? newSelection
+                            : List.of(targetId);
+
                     // Klick auf Objekt -> Verschieben vorbereiten
-                    return new PendingMoveState(target.get(), e.x(), e.y());
+                    return new PendingMoveState(movingIds, e.x(), e.y());
                 });
     }
 

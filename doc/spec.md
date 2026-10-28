@@ -13,6 +13,7 @@ Was habe ich so geplant fuer den FMC-Editor:
   - CTRL+Klick auf ein drittes Objekt: selektiert das dritte Objekt zusaetzlich zu den bereits selektierten Objekten.
   - CTRL+Klick auf ein bereits selektiertes Objekt: entfernt dieses Objekt wieder aus der Auswahl.
   - Einfacher Klick auf die leere Flaeche: hebt die Auswahl auf. Ebenso ESC.
+  - CTRL+Klick+Drag auf der leeren Flaeche spannt ein Auswahlrechteck (Gummiband) auf. Beim Loslassen werden alle Objekte im Rechteck ausgewaehlt; das Band ersetzt die bisherige Auswahl. Ein CTRL+Klick ohne Drag aendert nichts, ESC bricht das Band ab.
 - Loeschen: Die DEL-Taste loescht alle aktuell selektierten Objekte.
 - Groessenanpassung der Ks und Rs
 - Angaben von Text in den Ks und Rs durch Auswahl eines Tools an der Seite.

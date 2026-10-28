@@ -16,10 +16,14 @@ public sealed interface DiagramEvent extends DomainEvent {
     record ObjectAdded(DiagramObject object) implements DiagramEvent {}
 
     /** Trägt Vor- UND Nach-Position — der Vor-Zustand macht den Fakt invertierbar (Undo-Regel). */
-    record ObjectMovedApplied(UUID id, double oldX, double oldY, double newX, double newY) implements DiagramEvent {}
+    record ObjectMoved(UUID id, double oldX, double oldY, double newX, double newY) implements DiagramEvent {}
+
+    /** Batch-Fakt einer Gruppenverschiebung: ein Eintrag je Objekt mit
+     *  Vor- und Nach-Position (index-parallel zur Request-ID-Liste). */
+    record ObjectsMoved(List<ObjectMoved> movedObjects) implements DiagramEvent {}
 
     /** Trägt Vor- UND Nach-Zustand — der Vor-Zustand macht den Fakt invertierbar (Undo-Regel). */
-    record ObjectResizedApplied(DiagramObject previous, DiagramObject resized) implements DiagramEvent {}
+    record ObjectResized(DiagramObject previous, DiagramObject resized) implements DiagramEvent {}
 
     record ConnectionEstablished(Connection connection) implements DiagramEvent {}
 

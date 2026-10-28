@@ -39,7 +39,13 @@ public class SelectionService implements SelectionQuery {
     }
 
     private void onSetSelection(ActionEvent.SetSelection event) {
-        this.selection = event.selectedIds().stream().distinct().toList();
+        List<UUID> requested = event.selectedIds().stream().distinct().toList();
+        // Identische Menge => kein Fakt (Ruhe für UI und Tests; Plain-Press auf
+        // bereits Selektiertes kollabiert die Auswahl nicht und rauscht nicht).
+        if (requested.equals(selection)) {
+            return;
+        }
+        this.selection = requested;
         publishFact(new DiagramEvent.SelectionChanged(selection));
     }
 

@@ -10,6 +10,11 @@ import java.util.function.Predicate;
 
 public abstract class BaseState implements InteractionState {
 
+    /** Einheitlicher Drag-Schwellenwert für Klick-vs-Drag-Entscheidungen
+     *  (PendingMove, PendingCreateOrPan, Gummiband) — eine Konstante in der
+     *  Basis-Klasse statt Kopien in jedem State. */
+    protected static final double DRAG_THRESHOLD_PIXELS = 4.0;
+
     /** Prüft eine Regel unter Einbeziehung von Event UND Context (z. B. für Hit-Testing) */
     @FunctionalInterface
     public interface EventGuard<T extends DomainEvent> {

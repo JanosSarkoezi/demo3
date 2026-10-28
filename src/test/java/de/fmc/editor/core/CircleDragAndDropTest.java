@@ -28,7 +28,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class CircleDragAndDropTest {
 
     private InteractionEventBus eventBus;
-    private List<ActionEvent.MoveObject> movedEvents;
+    private List<ActionEvent.MoveObjects> movedEvents;
     private final List<DiagramObject> diagramObjects = new ArrayList<>();
     private UUID defaultLayerId;
 
@@ -60,8 +60,9 @@ class CircleDragAndDropTest {
         eventBus = new InteractionEventBus(dynamicDiagram, cameraInfo,
                 new GridSpec(10.0), new SelectionService());
 
-        // Aufzeichnen aller Objekt-Verschiebungs-Events
-        eventBus.subscribe(ActionEvent.MoveObject.class, movedEvents::add);
+        // Aufzeichnen aller Objekt-Verschiebungs-Events (die Geste spricht
+        // seit dem Gruppen-Move immer den pluralen Request; n=1 ist der Spezialfall)
+        eventBus.subscribe(ActionEvent.MoveObjects.class, movedEvents::add);
 
         // Sobald ein Element erzeugt wird, fügen wir es direkt unserem Diagramm-Speicher hinzu
         eventBus.subscribe(ActionEvent.AddElement.class, e -> diagramObjects.add(e.object()));
@@ -106,7 +107,7 @@ class CircleDragAndDropTest {
                 .hasSize(1)
                 .first()
                 .satisfies(event -> {
-                    assertThat(event.id()).isEqualTo(createdCircle.id());
+                    assertThat(event.ids()).containsExactly(createdCircle.id());
                     // Der Versatz berechnet sich aus der Start-Position (150, 200) bis zur End-Position (180, 220)
                     assertThat(event.deltaX()).isEqualTo(30.0);
                     assertThat(event.deltaY()).isEqualTo(20.0);
