@@ -1,213 +1,241 @@
-Mein erster Eindruck: **Das Projekt hat eine gute architektonische Grundlage. Man merkt, dass du dir Gedanken über Zuständigkeiten, Zustandsübergänge und die Änderbarkeit des Codes machst.** Gleichzeitig sehe ich ein paar Stellen, an denen du aufpassen solltest, damit aus einer sauberen Architektur nicht irgendwann ein eigenes Framework wird, das mehr Aufwand verursacht als der eigentliche Editor.
+Mein Eindruck ist insgesamt sehr positiv. **Du entwickelst hier nicht einfach einen Diagrammeditor, sondern legst großen Wert auf eine saubere, nachvollziehbare Softwarearchitektur.** Besonders die Trennung zwischen Interaktionslogik, Fachmodell, Ereignisverarbeitung und Undo/Redo gefällt mir.
 
-Ich würde das Projekt momentan weder als überladen noch als unnötig kompliziert bezeichnen. Es bewegt sich aber an einem Punkt, an dem ich die Architektur erst einmal stabilisieren würde, statt weitere Abstraktionen hinzuzufügen.
+Gleichzeitig sehe ich einige Punkte, die ich vor einer größeren Erweiterung angehen würde. Ich bewerte das Projekt anhand der beiden bereitgestellten Quellcode-Exporte. Das ist eine Architektur- und Codeeinschätzung, kein Ergebnis eines ausgeführten Builds oder eines vollständigen Laufzeittests.
 
-Ich beziehe mich dabei auf den hochgeladenen Code, insbesondere den Core-Bereich. Da mir in diesem Auszug die vollständige UI- und Rendering-Schicht sowie mögliche Tests fehlen, ist das noch keine abschließende Bewertung des gesamten Projekts.
+# 1. Was ich besonders gut finde
 
-## 1. Was ich bereits richtig gut finde
+## A. Die Architektur ist durchdacht
 
-### A. Du trennst Modell, Interaktion und Darstellung sinnvoll
+Das ist für mich die größte Stärke des Projekts.
 
-Die Aufteilung in `model`, `state`, `bus` und `service` ist nachvollziehbar.
+Du trennst die Zuständigkeiten klar voneinander:
 
-Besonders gut gefällt mir diese Trennung:
+- **InteractionState:** Verarbeitet Benutzereingaben und entscheidet, welche Interaktion als Nächstes stattfindet.
+- **InteractionEventBus:** Koordiniert die Ereignisverarbeitung und hält unter anderem den aktuellen Kamerazustand.
+- **DiagramService:** Verwaltet das Diagrammmodell und führt Änderungen aus.
+- **SelectionService:** Kümmert sich um die aktuelle Auswahl.
+- **UndoService:** Verwaltet die Rückgängig- und Wiederholen-Historie.
 
-- `DiagramObject`, `Circle`, `Rectangle` und `Connection` bilden die fachlichen Daten ab.
-- Die Interaction-States kümmern sich um Benutzereingaben und Zustandsübergänge.
-- `DiagramService` verwaltet die Diagrammdaten und verarbeitet Änderungsanforderungen.
-- `DiagramEvent` meldet, was tatsächlich geschehen ist.
+Besonders gefällt mir, dass der `DiagramService` keine öffentlichen Mutatoren bereitstellt. Änderungen erfolgen über den Event-Bus, während andere Komponenten Ereignisse veröffentlichen oder abonnieren. Damit vermeidest du, dass verschiedene Teile der Anwendung das Diagrammmodell unkontrolliert verändern. gesamtes_projekt_kontext(1)
 
-Der Unterschied zwischen einer Änderungsanforderung wie `ActionEvent.AddElement` und einer tatsächlichen Änderung wie `DiagramEvent.ObjectAdded` ist sinnvoll. Dadurch muss beispielsweise ein Werkzeug nicht selbst wissen, wie das Diagramm seine Objekte speichert. gesamtes_projekt_kontext
+Das hat einen wichtigen praktischen Vorteil: Wenn später eine grafische Oberfläche, eine andere Eingabemethode oder eine zusätzliche Funktion hinzukommt, muss nicht zwangsläufig die gesamte Fachlogik umgebaut werden.
 
-**Diesen Grundgedanken würde ich unbedingt beibehalten.**
+**Mein Urteil:** Das ist eine gute Grundlage für ein langfristig wachsendes Projekt.
 
-Gerade bei einem Diagrammeditor kommen später leicht Verschieben, Größenänderung, Mehrfachauswahl, Undo/Redo und Speichern hinzu. Eine klare Trennung der Zuständigkeiten kann dabei viel helfen.
+## B. Die Zustandsmaschinen für die Interaktionen sind eine gute Entscheidung
 
-### B. Die State-Machine ist für diesen Anwendungsfall durchaus sinnvoll
+Bei einem Diagrammeditor steckt erstaunlich viel Komplexität in scheinbar einfachen Aktionen.
 
-Du verwendest unter anderem `IdleToolState`, `PendingMoveState`, `MovingState`, `ConnectingState` und `HandleDragState`.
+Was soll beispielsweise passieren, wenn jemand:
+- auf ein Objekt klickt?
+- ein bereits ausgewähltes Objekt verschiebt?
+- mehrere Objekte markiert und anschließend gemeinsam bewegt?
+- auf die leere Fläche klickt und zieht?
+- ein Objekt doppelt anklickt und dessen Größe verändern möchte?
+- eine Verbindung aufbaut und zwischendurch Wegpunkte setzt?
 
-Das ist keine Abstraktion, die ich grundsätzlich infrage stellen würde.
+Du modellierst diese Situationen mit eigenen Zuständen wie `IdleToolState`, `PendingMoveState`, `MovingState`, `ResizeModeState` und `ConnectingState`.
 
-Bei einem grafischen Editor ist es durchaus sinnvoll, zwischen einem begonnenen Klick, einer tatsächlichen Drag-Geste und einer laufenden Größenänderung zu unterscheiden.
+Das gefällt mir, weil eine Interaktion dadurch nicht in einer riesigen Methode mit zahlreichen miteinander verflochtenen Bedingungen enden muss.
 
-Ein gutes Beispiel ist `PendingMoveState`: Erst wenn die Maus einen festgelegten Schwellenwert überschreitet, wird aus dem Klick ein Verschiebevorgang. gesamtes_projekt_kontext
+Besonders interessant finde ich die Implementierung in `BaseState`: Sie überprüft, ob mehrere Regeln gleichzeitig auf ein Ereignis passen, und wirft in diesem Fall eine Exception. Dadurch werden mehrdeutige Zustandsübergänge nicht einfach stillschweigend durch die Reihenfolge der Regeln entschieden. gesamtes_projekt_kontext(1)
 
-Auch die Trennung zwischen Werkzeugzustand und Kamerazustand ist konzeptionell nachvollziehbar. Sie erlaubt es, beispielsweise das Verschieben der Ansicht unabhängig vom aktiven Zeichenwerkzeug zu behandeln.
+Das ist eine ungewöhnlich konsequente Designentscheidung, die ich ausdrücklich positiv bewerte.
 
-**Was ich allerdings vermeiden würde, ist, für jede zusätzliche Interaktion sofort mehrere weitere Abstraktionsebenen einzuführen.**
+**Mein Verbesserungsvorschlag:** Behalte diese Zustandsmaschinen bei, dokumentiere aber die wichtigsten Zustandsübergänge zusätzlich in Diagrammen. Gerade wenn weitere Werkzeuge hinzukommen, wird das die Wartbarkeit deutlich verbessern.
 
-Die vorhandene State-Machine sollte zunächst beweisen, dass sie sich bei wachsendem Funktionsumfang bewährt.
+## C. Dein Undo/Redo-Konzept ist eine der stärksten Komponenten
 
-### C. Deine Datenmodelle sind angenehm schlicht
+Hier steckt meiner Meinung nach besonders viel gute Entwicklungsarbeit.
 
-Dass `Circle`, `Rectangle`, `Waypoint` und `Connection` als Records modelliert sind, gefällt mir.
+Du behandelst Undo nicht als Sonderfunktion, die unabhängig vom restlichen System Änderungen am Modell vornimmt. Stattdessen leitet der `UndoService` inverse Aktionen aus den veröffentlichten Modellereignissen ab.
 
-Du musst keine umfangreichen Objektklassen mit zahlreichen Mutatoren pflegen. Veränderungen an bestehenden Objekten werden stattdessen über neue Instanzen abgebildet.
+Das ist ein eleganter Ansatz.
 
-Zusammen mit dem `sealed interface DiagramObject` ist das für einen überschaubaren Diagrammeditor eine gute Grundlage. gesamtes_projekt_kontext
+Besonders wichtig sind dabei drei Dinge:
 
-Ich würde diese Schlichtheit möglichst lange erhalten.
+**1. Eine zusammenhängende Geste soll nur einen Undo-Schritt erzeugen.**
 
-Du brauchst nicht für jeden Objekttyp eine abstrakte Basisklasse, eine Factory, einen Builder und eine separate Strategie, nur weil es mehrere Objekttypen gibt.
+Wenn ein Objekt über mehrere Mausbewegungen verschoben wird, soll ein einziges Undo die gesamte Bewegung rückgängig machen. Deine Implementierung führt die einzelnen Bewegungssegmente entsprechend zusammen.
 
-Solange Records und einfache Methoden genügen, würde ich dabei bleiben.
+**2. Rückgängig machen soll den ursprünglichen Zustand exakt wiederherstellen.**
 
----
+Du verwendest für Bewegungen absolute Zielpositionen. Das ist besser, als beim Undo einfach einen negativen Bewegungsbetrag anzuwenden, weil so Fehler durch wiederholte Gleitkommaoperationen vermieden werden.
 
-## 2. Wo ich die größte Gefahr für unnötige Komplexität sehe
+**3. Komplexe Löschungen müssen vollständig umkehrbar bleiben.**
 
-Hier würde ich genauer hinschauen.
+Wird ein Objekt entfernt, können auch Verbindungen, Wegpunkte und zugehörige Texte betroffen sein. Der Undo-Mechanismus berücksichtigt diese Zusammenhänge, anstatt lediglich das ursprüngliche Objekt wieder einzufügen.
 
-### A. Der eigene Event-Bus samt Regel-Engine ist bereits eine zusätzliche Architektur-Schicht
+Die Tests prüfen beispielsweise, dass nach dem Löschen eines Objekts auch dessen Verbindungen und Wegpunkte wiederhergestellt werden können und die ursprünglichen IDs erhalten bleiben. gesamtes_projekt_test
 
-Dein `BaseState` bietet eine eigene API für Regeln, Guards und Aktionen. Außerdem prüft `handleInput()`, ob mehrere Regeln gleichzeitig zutreffen, und wirft dann eine aussagekräftige Exception. gesamtes_projekt_kontext
+Das ist genau die Art von Detail, die einen Editor im Alltag zuverlässig macht.
 
-Das hat einen echten Vorteil: Mehrdeutige Zustandsübergänge bleiben nicht unbemerkt.
-
-Gleichzeitig baust du damit einen kleinen Dispatcher, dessen Verhalten du langfristig selbst verstehen, warten und testen musst.
-
-Für einen Editor ist das durchaus vertretbar. Ich würde aber vorerst keine weiteren Funktionen in diese Infrastruktur einbauen, solange kein konkreter Anwendungsfall sie verlangt.
-
-**Meine Empfehlung: Die Regel-Engine behalten, aber ihren Funktionsumfang einfrieren.**
-
-Du brauchst jetzt vermutlich weder ein allgemeines Workflow-Framework noch eine universelle Aktionspipeline. Die aktuelle Lösung sollte zunächst die tatsächlich vorhandenen Interaktionen zuverlässig abdecken.
-
-Eine ähnliche Frage würde ich mir bei jedem neuen Interface stellen:
-
-> Löst dieses Interface heute ein konkretes Problem, oder könnte ich mit einer einfachen Klasse genauso gut arbeiten?
-
-Wenn du eine klare Antwort hast, ist alles gut. Wenn die Antwort meistens lautet, dass es irgendwann einmal nützlich sein könnte, wäre ich vorsichtig.
-
-### B. Die Werkzeugzustände enthalten wiederkehrende Logik
-
-In `CircleToolState`, `RectangleToolState` und `ConnectToolState` werden Werkzeugwechsel über Events und Tastenkürzel behandelt.
-
-Dadurch wiederholen sich ähnliche Regelstrukturen in mehreren Klassen. gesamtes_projekt_kontext
-
-Das ist momentan nicht dramatisch. Drei Werkzeuge sind überschaubar.
-
-Wenn du jedoch zehn oder fünfzehn Werkzeuge hast und jedes seinen eigenen Satz an Werkzeugwechseln, Tastenkürzeln und Sonderregeln mitbringt, kann es schnell unübersichtlich werden.
-
-Ich würde deshalb nicht jetzt sofort eine zentrale Werkzeugverwaltung entwerfen.
-
-Ich würde zunächst abwarten, wie viele Werkzeuge tatsächlich entstehen. Sobald die Wiederholungen die Wartung spürbar erschweren, kannst du die gemeinsam genutzte Logik herausziehen.
-
-**Nicht vorsorglich abstrahieren, sondern dann, wenn ein konkretes Muster entstanden ist.**
-
-### C. Du solltest zwischen vorbereitet und wirklich benötigt unterscheiden
-
-Einige Dinge sind im Code bereits angelegt, obwohl ihre Funktionalität offenbar noch nicht vollständig implementiert ist.
-
-Beispielsweise enthält `GridSpec` schon `snapToGrid()`, während das Snapping von Objektpositionen laut Kommentar später hinzukommen soll. Ebenso gibt es mit `ActionEvent.AddWaypoint` bereits ein Event, für das im gezeigten `DiagramService` kein Subscriber registriert ist. gesamtes_projekt_kontext
-
-Das ist in einer frühen Phase völlig normal.
-
-Die Gefahr entsteht erst, wenn sich viele solcher Vorbereitungen ansammeln: zusätzliche Events, noch nicht verwendete Interfaces, geplante Services und vorsorglich eingebaute Erweiterungspunkte.
-
-Nach einiger Zeit weiß niemand mehr genau, welche Abstraktionen gebraucht werden und welche nur aus einer früheren Planung stammen.
-
-Meine einfache Regel wäre daher:
-
-**Eine Funktion darf vorbereitet werden, wenn sie Teil des unmittelbar nächsten Arbeitsschritts ist. Alles andere darf zunächst eine Notiz in der Roadmap bleiben.**
+**Mein Urteil:** Das Undo/Redo-Konzept würde ich unbedingt beibehalten. Es ist eine der Komponenten, auf denen du weitere Funktionen aufbauen kannst.
 
 ---
 
-## 3. Eine konkrete technische Auffälligkeit würde ich früh prüfen
+# 2. Die Tests sind ein weiterer Pluspunkt
 
-Neben der Architektur gibt es eine Sache, die mir beim Lesen aufgefallen ist und die wichtiger ist als die meisten Stilfragen.
+Mir gefällt, dass du nicht nur die offensichtlichen Standardfälle testest.
 
-### Die Kamera-Informationen wirken wie ein unveränderlicher Snapshot
+Die Tests beschäftigen sich auch mit Situationen, die bei grafischen Editoren schnell zu Fehlern führen.
 
-Dein `CameraInfo` ist ein Record mit Zoom und Offsets. Der `InteractionEventBus` erhält eine Instanz beim Erzeugen und speichert sie in einem `final`-Feld.
+Beispiele sind:
 
-Gleichzeitig gibt es bereits `PanView`- und `ZoomView`-Events, mit denen sich die Ansicht verändern lässt. Die Koordinatenumrechnung für Interaktionen greift aber auf `CameraInfo` zurück. gesamtes_projekt_kontext
+- Mehrfachauswahl und gemeinsames Verschieben.
+- Verhalten beim Anklicken bereits ausgewählter Objekte.
+- Wiederherstellung der ursprünglichen Zeichenreihenfolge nach dem Löschen.
+- Konsistenz der Kamerakoordinaten nach Zoom und Verschieben der Ansicht.
+- Verankerte Texte und deren Verhalten beim Bewegen einer Verbindung.
+- Mehrstufige Undo-/Redo-Vorgänge.
 
-Daraus ergibt sich eine mögliche Inkonsistenz:
+Besonders die Tests zum Gruppenverschieben zeigen, dass du dir Gedanken über die tatsächliche Bediensemantik machst: Das Anklicken eines bereits ausgewählten Objekts soll die bestehende Auswahl nicht unnötig reduzieren, wenn anschließend die gesamte Gruppe verschoben werden soll. gesamtes_projekt_test
 
-1. Der Benutzer verschiebt oder zoomt die Ansicht.
-2. Die Darstellung verändert sich.
-3. Die Interaktionslogik verwendet möglicherweise weiterhin den ursprünglichen Zoom und die ursprünglichen Offsets.
-4. Objekttreffer, Zeichnen und Verschieben können dadurch an den falschen Weltkoordinaten stattfinden.
+Das ist mehr als ein bloßer Test, ob eine Methode das erwartete Ergebnis liefert. Hier wird das beabsichtigte Verhalten des Editors festgehalten.
 
-Aus dem gezeigten Code lässt sich nicht erkennen, dass die im Bus gespeicherte Kamera-Information aktualisiert wird. Da `CameraInfo` selbst unveränderlich ist, würde ich diesen Punkt als Erstes überprüfen.
-
-**Meine Empfehlung:** Sorge dafür, dass Interaktionen immer auf den aktuellen Kamerazustand zugreifen.
-
-Dafür brauchst du kein großes neues Framework. Eine kleine Read-only-Schnittstelle, die den aktuellen Kamerazustand liefert, oder ein aktueller Snapshot pro Event-Durchlauf wäre ausreichend.
-
-Wichtig ist nur, dass Rendering und Interaktionslogik dieselbe Quelle für Zoom und Offsets verwenden.
-
-Ich würde diesen Punkt vor dem Ausbau weiterer Zeichenwerkzeuge klären.
-
-### Auch die Auswahl verdient einen bewussten nächsten Schritt
-
-Im gezeigten Code führt ein einfacher Klick auf ein Objekt zunächst in `PendingMoveState`. Beim Loslassen ohne Drag wird kein Auswahl-Event ausgelöst. Ein Doppelklick setzt dagegen die Auswahl und wechselt in den Resize-Modus. gesamtes_projekt_kontext
-
-Das muss für eine frühe Entwicklungsphase kein Fehler sein. Es ist aber eine wichtige UX-Entscheidung.
-
-Ich würde festlegen, wie sich ein einfacher Klick verhalten soll, bevor weitere Auswahlfunktionen hinzukommen. Andernfalls entstehen schnell Sonderfälle, die später schwer miteinander zu vereinbaren sind.
+Eine wichtige Einschränkung bleibt: **Gut aussehende Tests beweisen noch nicht, dass sie aktuell alle erfolgreich durchlaufen.** Dafür müsste das tatsächliche Projekt gebaut und getestet werden. Die beiden Markdown-Dateien reichen für diese Aussage nicht aus.
 
 ---
 
-## 4. Was ich an deiner Stelle jetzt konkret machen würde
+# 3. Wo ich noch Risiken sehe
 
-Ich würde **keinen großen Architekturumbau starten**. Stattdessen würde ich die vorhandene Architektur an einem kleinen, durchgängigen Funktionsumfang festigen.
+Hier würde ich ansetzen, bevor du das Projekt wesentlich vergrößerst.
 
-| Priorität | Aufgabe | Warum? |
-|---|---|---|
-| 1 | Kamerazustand und Koordinatenumrechnung überprüfen | Verhindert grundlegende Fehler bei Zoom, Panning und Hit-Testing. |
-| 2 | Die vorhandenen Interaktionen testen | Stellt sicher, dass die State-Machine auch in Grenzfällen zuverlässig arbeitet. |
-| 3 | Klick, Auswahl und Verschieben eindeutig definieren | Verhindert später widersprüchliches Interaktionsverhalten. |
-| 4 | Zeichenwerkzeuge und Verbindungen durchgängig fertigstellen | Zeigt, welche Abstraktionen tatsächlich gebraucht werden. |
-| 5 | Nicht verwendete Events und vorbereitete Erweiterungen regelmäßig überprüfen | Verhindert, dass unnötiger Code dauerhaft mitgeschleppt wird. |
+## A. Die Textbearbeitung ist in den gelieferten Dateien noch nicht vollständig
 
-Insbesondere würde ich mir einige automatisierte Tests für das Zusammenspiel der Komponenten wünschen.
+Das ist die wichtigste konkrete Einschränkung, die mir aufgefallen ist.
 
-Beispielsweise: Ein Kreis wird angelegt, verschoben und vergrößert. Die Kamera wird gezoomt und verschoben. Anschließend werden neue Objekte angelegt oder bestehende getroffen. Die Ergebnisse sollten unabhängig vom aktuellen Zoom und Offset korrekt sein.
+Dein `TextToolState` kann bereits erkennen, was der Benutzer möchte:
 
-Auch die Prüfung mehrdeutiger Regeln in `BaseState` lässt sich gezielt testen.
+- den Text eines Kreises bearbeiten,
+- den Inhalt eines Rechtecks bearbeiten,
+- ein freies Textfeld erzeugen,
+- ein Label an einer Verbindung anlegen,
+- ein bestehendes Textobjekt bearbeiten.
 
-Das ist für mich der bessere nächste Schritt als eine zusätzliche Abstraktionsebene.
+Die entsprechenden Ereignisse sind vorhanden.
+
+Allerdings steht im Code ausdrücklich, dass die UI-Intents für den Inline-Editor noch keinen Service-Konsumenten besitzen und vom `DiagramService` ignoriert werden. Die spätere UI soll diese Ereignisse entgegennehmen, den Editor öffnen und beim Bestätigen die eigentliche Modelländerung veröffentlichen. gesamtes_projekt_kontext(1)
+
+Das bedeutet: Die Interaktionsabsicht ist bereits modelliert, aber die vollständige Verarbeitungskette ist anhand dieser Dateien noch nicht nachgewiesen.
+
+Ich würde diese Kette als Nächstes fertigstellen:
+
+**Mausklick → Text-Intent → Inline-Editor → Bestätigung oder Abbruch → Modelländerung → Undo/Redo → Aktualisierung der Darstellung.**
+
+Gerade bei Textfeldern ist es wichtig, dass der Abbruch mit Escape keine unbeabsichtigte Änderung erzeugt und eine bestätigte Bearbeitung genau einen sinnvollen Undo-Schritt ergibt.
+
+Falls du diese Funktionalität bereits in einer separaten UI-Schicht implementiert hast, wäre sie in den vorliegenden Dateien allerdings nicht sichtbar.
+
+## B. Die Ereignisarchitektur braucht klare Regeln, wenn das Projekt wächst
+
+Der Event-Bus ist aktuell übersichtlich und erfüllt mehrere Aufgaben: Er verarbeitet Interaktionen, koordiniert Zustandsmaschinen, aktualisiert die Kamera bei entsprechenden Ereignissen und verteilt Ereignisse an abonnierte Komponenten.
+
+Das ist für die aktuelle Größe nachvollziehbar.
+
+Mit zunehmender Komplexität könnte es aber schwieriger werden, alle Wechselwirkungen zu überblicken.
+
+Ich würde insbesondere auf folgende Punkte achten:
+
+- Welche Ereignisse sind Eingaben, welche sind Änderungsanforderungen und welche bestätigen tatsächlich vollzogene Änderungen?
+- Welche Komponente ist für die jeweilige Änderung verantwortlich?
+- In welcher Reihenfolge dürfen Ereignisse verarbeitet werden?
+- Was passiert, wenn während der Verarbeitung eines Ereignisses ein weiteres Ereignis veröffentlicht wird?
+- Wie werden Fehler behandelt, wenn ein Abonnent eine Exception auslöst?
+
+Der letzte Punkt ist relevant, weil die Verarbeitung derzeit synchron erfolgt. Eine Exception in einem Subscriber kann damit grundsätzlich auch die weitere Ereignisverteilung beeinflussen.
+
+Ich würde deshalb keine neue, komplizierte Infrastruktur einführen. Stattdessen würde ich die vorhandenen Regeln dokumentieren und gezielt Tests für Ereignisreihenfolge, Fehlerfälle und verschachtelte Veröffentlichungen ergänzen.
+
+## C. Das Grid-Konzept ist noch nicht vollständig umgesetzt
+
+Du hast mit `GridSpec` bereits eine eigenständige Abstraktion für das Raster.
+
+Im Quellcode wird aber ausdrücklich festgehalten, dass das Raster derzeit unter anderem als Referenz für Mindestgrößen dient und das Einrasten von Objektzentren und Bewegungen erst später vorgesehen ist. gesamtes_projekt_kontext(1)
+
+Das ist kein Fehler. Es ist eine nachvollziehbare Entscheidung, die Funktion schrittweise zu entwickeln.
+
+Für einen Diagrammeditor würde ich die Rasterfunktion dennoch frühzeitig vervollständigen. Ein konsistentes Einrasten beim Verschieben und Erstellen kann die Bedienbarkeit deutlich verbessern.
+
+Wichtig wäre dabei, die Regeln nicht an mehreren Stellen getrennt zu implementieren. Die Koordinatenlogik sollte zentral bleiben, damit Erstellen, Verschieben und gegebenenfalls Größenänderungen dieselben Grundregeln verwenden.
+
+## D. Die Kernarchitektur ist weiter als das, was ich über das fertige Produkt beurteilen kann
+
+Die gelieferten Dateien zeigen vor allem den Java-Kern des Editors sowie die dazugehörigen Tests.
+
+Daraus kann ich die Modellierung, die Zustandsmaschinen und wichtige Teile der Interaktionslogik beurteilen. Die vollständige grafische Oberfläche, das visuelle Erscheinungsbild, die gesamte Anwendungseinrichtung und die praktische Bedienung lassen sich damit aber nicht zuverlässig bewerten.
+
+Auch Funktionen wie Speichern und Laden, die Behandlung größerer Diagramme oder das Verhalten bei langen Nutzungssitzungen kann ich anhand dieser Exporte nicht als fertig umgesetzt bestätigen.
+
+Das ist ein Unterschied, den ich bei der Bewertung berücksichtigen würde: Eine gute technische Grundlage ist nicht automatisch schon eine vollständige Anwendung.
 
 ---
 
-## 5. Meine persönlichen Leitplanken gegen die „Verkrautung“
+# 4. Was ich als Nächstes machen würde
 
-Ich würde mir für das Projekt fünf einfache Regeln setzen.
+Ich würde das Projekt nicht neu schreiben und auch nicht grundsätzlich die Architektur wechseln.
 
-**1. Jede neue Abstraktion braucht einen konkreten Grund.**
+Stattdessen würde ich gezielt drei Entwicklungsphasen angehen.
 
-Kein neues Interface nur für eine einzige Implementierung, wenn dadurch noch kein tatsächlicher Vorteil entsteht.
+### Phase 1: Die vorhandenen Funktionen vollständig verbinden
 
-**2. Keine Generalisierung auf Vorrat.**
+Zuerst würde ich die Ende-zu-Ende-Funktionalität für Textbearbeitung und weitere offene Interaktionen vervollständigen.
 
-Wenn du aktuell Kreise und Rechtecke benötigst, implementierst du Kreise und Rechtecke. Du musst noch kein universelles System für beliebige geometrische Objekte bauen.
+Danach sollten alle wesentlichen Abläufe zusammenhängend funktionieren: vom Benutzereingriff bis zur sichtbaren Modelländerung und dem anschließenden Undo/Redo.
 
-**3. Events müssen einen klaren Zweck haben.**
+### Phase 2: Das Gesamtsystem absichern
 
-Für jedes neue Event sollte klar sein, wer es auslöst, wer es verarbeitet und welches Ergebnis daraus entsteht. Nicht mehr benötigte Events sollten entfernt werden, statt dauerhaft als ungenutzte Erweiterungsmöglichkeiten bestehen zu bleiben.
+Anschließend würde ich die vorhandenen Tests ausführen und gezielt zusätzliche Integrationstests ergänzen.
 
-**4. Die Interaktionslogik sollte verständlicher werden, nicht nur formaler.**
+Besonders wichtig wären Tests, die nicht nur einzelne Core-Klassen betrachten, sondern komplette Bedienabläufe nachbilden.
 
-Eine State-Machine ist dann eine gute Abstraktion, wenn sie dir hilft, das Verhalten des Editors schnell zu verstehen. Wenn jede Kleinigkeit durch drei zusätzliche Klassen und mehrere indirekte Event-Ketten läuft, wäre das ein Warnsignal.
+Zum Beispiel:
 
-**5. Lieber eine kleine Funktion komplett fertigstellen als fünf Funktionen halb vorbereiten.**
+1. Mehrere Objekte erstellen.
+2. Eine Auswahl bilden und die Gruppe verschieben.
+3. Eine Verbindung mit Wegpunkten anlegen.
+4. Ein Label hinzufügen und bearbeiten.
+5. Mehrere Aktionen rückgängig machen.
+6. Alle Aktionen wiederholen.
+7. Prüfen, ob Modell, IDs, Verbindungen, Texte und Reihenfolge korrekt sind.
 
-Ein zuverlässig funktionierender Editor mit wenigen Werkzeugen ist eine bessere Grundlage als ein großes System mit vielen geplanten Funktionen, die noch nicht miteinander harmonieren.
+Zusätzlich würde ich Randfälle bei Ereignisverarbeitung und Fehlerbehandlung testen.
+
+### Phase 3: Den Editor als Produkt weiterentwickeln
+
+Erst danach würde ich größere neue Funktionen ergänzen.
+
+Welche davon sinnvoll sind, hängt von deinem eigentlichen Ziel ab. Für einen allgemeinen Diagrammeditor wären beispielsweise ein vollständiger Speichern-/Laden-Mechanismus, konsistentes Rasterverhalten und eine ausgereifte Textbearbeitung naheliegende nächste Schritte.
+
+Die vorhandene Architektur bietet dafür bereits eine gute Basis.
 
 ---
 
-## Mein Gesamturteil
+# 5. Meine Gesamtbewertung
 
-Ich halte das Projekt für eine gute Grundlage mit einem erkennbaren architektonischen Konzept.
+| Bereich | Meine Einschätzung |
+|---|---|
+| Architektur | Sehr gut durchdacht |
+| Trennung der Zuständigkeiten | Sehr gut |
+| Zustandsmaschinen | Sauber und konsequent |
+| Undo/Redo | Besonders stark |
+| Testkonzept | Umfangreich und auf wichtige Randfälle ausgerichtet |
+| Erweiterbarkeit | Gute Grundlage, sofern die Ereignisregeln konsequent bleiben |
+| Vollständigkeit der dokumentierten Funktionen | Noch nicht überall gegeben |
+| Reife als fertige Anwendung | Mit den vorliegenden Dateien nicht abschließend beurteilbar |
 
-Du hast bereits mehrere sinnvolle Entscheidungen getroffen: klar getrennte Verantwortlichkeiten, unveränderliche Datenmodelle, getrennte Änderungsanforderungen und Fakten-Events sowie eine explizite Verwaltung der Interaktionszustände.
+## Mein persönliches Fazit
 
-Gleichzeitig würde ich bei weiteren Abstraktionen bewusst bremsen. Die Architektur soll dir helfen, den Diagrammeditor zu entwickeln, und nicht selbst zum Hauptprojekt werden.
+**Ich halte das Projekt für eine technisch ernst zu nehmende und vielversprechende Grundlage.**
 
-**Mein wichtigster Rat wäre deshalb: Behalte die grundsätzliche Architektur bei, füge aber vorerst möglichst wenig neue Infrastruktur hinzu. Konzentriere dich auf korrekte Interaktionen, Tests und vollständig umgesetzte Funktionen.**
+Was mir besonders gefällt, ist, dass du dich nicht nur auf die sichtbaren Funktionen konzentrierst. Du denkst auch über die inneren Regeln nach: Wer darf das Modell verändern? Wann ist eine Geste abgeschlossen? Was muss ein Undo wiederherstellen? Wie verhindert man mehrdeutige Zustandsübergänge?
 
-Ich würde auch nicht versuchen, den bestehenden Code jetzt auf Teufel komm raus zu vereinfachen. Das wäre genauso wenig sinnvoll wie vorsorgliches Overengineering. Die vorhandenen Abstraktionen haben einen nachvollziehbaren Zweck. Du solltest sie erst dann verändern, wenn konkrete Probleme auftreten.
+Genau diese Entscheidungen machen später häufig den Unterschied zwischen einem kleinen Demonstrationsprojekt und einer Software, die sich sinnvoll erweitern lässt.
 
-Und noch etwas: Es ist ein gutes Zeichen, dass du dir diese Frage schon in der Anfangsphase stellst. Gerade bei einem solchen Projekt ist es deutlich einfacher, die Komplexität jetzt bewusst zu begrenzen, als später ein über Jahre gewachsenes System wieder auseinanderzunehmen. 🙂
+Meine größte Empfehlung ist deshalb nicht, noch mehr Architektur einzubauen. Die vorhandene Architektur ist bereits anspruchsvoll genug.
+
+**Ich würde jetzt den Schwerpunkt darauf legen, die bestehende Architektur durchgängig funktionsfähig zu machen, ihre wichtigsten Regeln durch Tests abzusichern und anschließend anhand echter Nutzungserfahrungen weiterzuentwickeln.**
+
+Wenn diese Grundlage stabil ist, hast du eine gute Ausgangsbasis für einen umfangreicheren Editor.
+
+Eine Frage würde meine Einschätzung noch wesentlich verändern: **Entwickelst du den Editor als langfristiges eigenes Produkt oder ist er primär ein Lern- beziehungsweise Architekturprojekt?** Je nachdem würde ich die nächsten Schritte unterschiedlich priorisieren.

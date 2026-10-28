@@ -1,115 +1,72 @@
-# Review: FMC-Editor
+# Einschätzung zum Projekt
 
-Kurz vorweg: Für ein Projekt in der Anfangsphase ist das **architektonisch überdurchschnittlich sauber**. Man sieht an vielen Stellen bewusste Entscheidungen (Guard-Disjunktions-Invariante, CQRS-artige Trennung, deferred commits, sealed interfaces + Pattern Matching). Das Fundament trägt. Ich fokussiere im Folgenden auf das, was *jetzt* günstig zu korrigieren ist, bevor es sich festfrisst – also genau der „Verkrautung"-Prävention.
+Ich habe mir den Code, die Architektur und die Tests gründlich angesehen. Kurzfassung: Das ist **deutlich überdurchschnittlich** — nicht wegen der Feature-Menge, sondern wegen der Konsequenz, mit der ein einziges Architektur-Prinzip durchgehalten wird. Du hast einen erkennbaren Stil und einen erkennbaren Kompass.
 
-## Was richtig stark ist
+## Was richtig gut ist
 
-- **Zwei parallele State-Machines** (Tool vs. Camera) mit `isActive()` als Prioritätssignal – elegant gelöst. Die Kamera „pausiert" das Tool, ohne dass das Tool davon wissen muss.
-- **`BaseState` mit Ambiguity-Check**: Regeln, die gleichzeitig greifen, knallen mit `IllegalStateException`. Das ist der beste Anti-Verkrautung-Mechanismus im ganzen Code – er zwingt dazu, Guards disjunkt zu halten. Sehr gut.
-- **`Pending*State`-Muster** (Click-vs-Drag-Threshold). Verhindert, dass Klick- und Drag-Semantik sich gegenseitig ins Gehege kommen.
-- **`HandleDragState` mit deferred commit**: Live-Vorschau ist UI-Sache, Backend bekommt genau ein Resize-Event beim Release. Verhindert Event-Spam und Modell-Churn.
-- **Sealed-Hierarchien + exhaustives Switch**: `moved()` und `hit()` in `DiagramService` sind Musterbeispiele – der Compiler warnt, wenn eine neue Objektart dazukommt.
+**1. Die Einbahnstraße ist echt und nicht nur behauptet.**
+Kein Service mutiert den Zustand eines anderen, kein State schreibt ins Modell. Alles läuft über `publish(Request) → Service → publish(Fakt)`. Das ist in kleineren Projekten oft eine fromme Behauptung; hier ist es an jeder Stelle spürbar (z. B. dass `SelectionService` bei `ObjectsRemoved` tote IDs automatisch abstäubt, ohne dass irgendein Aufrufer das orchestrieren muss).
 
-## Die echten Verkrautungskandidaten
+**2. Fakten tragen ihren Vor-Zustand — Undo wird mechanisch statt intelligent.**
+Das ist der cleverste Zug im ganzen Design. `ObjectMoved` hat `oldX/oldY`, `ObjectResized` hat `previous`, `ObjectsRemoved` hat `zIndices`. Dadurch muss `UndoService` **kein Kaskadenwissen** besitzen — genau die Falle, in die demo2 offenbar gelaufen ist. Das ist eine Lehre, die man teuer bezahlt und selten so sauber zieht.
 
-### 1. Tool-Wechsel + Shortcuts sind in jedem ToolState dupliziert 🔴
+**3. Guard-Disjunktheit als Invariante mit Fail-Fast.**
+`BaseState.handleInput` wirft bei mehreren Treffern eine `IllegalStateException` — statt stillschweigend die erste Regel zu nehmen. Das ist selten, sehr gut und macht die Registrierungsreihenfolge irrelevant. Der zugehörige `BaseStateTest` testet genau diese Invariante — vorbildlich.
 
-Das ist die größte Baustelle. `CircleToolState`, `RectangleToolState`, `ConnectToolState` und `IdleToolState` enthalten jeweils denselben `ActionEvent.SelectTool`-Switch **und** dieselben Shortcut-Regeln (`KEY_K`, `KEY_R`, `KEY_C`), nur mit anderem Ziel. Wenn du jetzt ein `LineToolState` oder `TextToolState` ergänzt, musst du in **jedem existierenden State** die Switch-Zweige und Shortcut-Regeln nachziehen. Vergisst du einen, wechselt das Tool dort nicht mehr. Genau so entsteht Verkrautung.
+**4. Zwei parallele State-Machines mit klarer Priorität.**
+Kamera vor Tool, Tool pausiert während `CameraPanningState.isActive()`. Das `RequestCameraPan`-Pattern (Tool **delegiert** Panning an die Kamera) ist elegant gelöst. Der Tool-State returned in seine Grundform, statt das Panning selbst zu verwalten — und der Test `toolInitiatedPanShouldEndOnPrimaryRelease` deckt genau das ab.
 
-**Vorschlag:** `abstract class ToolState extends BaseState` mit einer `registerCommonRules(ToolType self)`-Methode, die den `SelectTool`-Switch und die globalen Shortcuts einmalig registriert. Konkrete States erben und ergänzen nur ihr Spezifika:
+**5. Sealed + Records konsequent.**
+`DiagramObject`, `DomainEvent`, `ActionEvent`, `DiagramEvent`, `InputEvent` — überall exhaustives Pattern Matching möglich. Das ist modernes Java, das nicht aufgesetzt wirkt, sondern trägt. Auch die `switch (obj) { case Circle c -> … }`-Muster mit allen Feldern (der Kommentar „Kompat-Konstruktoren würden sonst still zurücksetzen" in `moved()`) zeigt, dass du die Fallstricke kennst.
 
-```java
-protected void registerToolSwitching(ToolType self) {
-    addRule(ActionEvent.SelectTool.class, (e, c) -> switch (e.tool()) {
-        case CIRCLE -> self == ToolType.CIRCLE ? this : new CircleToolState();
-        case RECTANGLE -> self == ToolType.RECTANGLE ? this : new RectangleToolState();
-        case CONNECT -> self == ToolType.CONNECT ? this : new ConnectToolState();
-        case SELECT, NONE -> self == ToolType.SELECT ? this : new IdleToolState();
-    });
-    addRule(InputEvent.KeyPressed.class, e -> e.code() == KEY_K, (e, c) -> new CircleToolState());
-    // ...
-}
-```
+**6. Explizite z-Order-Liste statt z-Index-Zahl.**
+HashMap + `zOrder`-Liste ist die richtige Wahl: O(1)-Lookup, exakte Wiederherstellung beim Undo (Snapshotten der Indizes vor der ersten Entfernung). Der `ZOrderRestoreTest.multiDeleteRestoreKeepsExactOrder` prüft genau die Falle, die man sonst verschläft.
 
-Dann bleibt pro State nur noch „Was passiert bei meinem Linksklick?" und „Was bedeutet ESC *für mich*?" übrig.
+**7. Tests als Spezifikation.**
+`UndoRedoTest`, `GroupMoveTest`, `ZOrderRestoreTest`, `DeleteObjectsTest` lesen sich wie Anforderungsdokumente. Die `@DisplayName`-Sätze sind aussagekräftig, die Szenarien realistisch (mehrere Drag-Segmente, geteilte Waypoints, Kaskade). Das ist der Stil, den man in fünf Jahren noch versteht.
 
-### 2. `IdleToolState` ist inkonsistent bei den Shortcuts 🟠
+**8. Die Javadocs erklären das Warum.**
+„Der Vor-Zustand macht den Fakt invertierbar", „demo2-Lektion: Undo verlor dauerhaft mitgelöschte Texte", „Guard-disjunkt: eine Regel pro Key". Solche Kommentare sind wertvoller als 100 Zeilen API-Doku.
 
-In `IdleToolState` steht:
+## Wo ich Bauchschmerzen hätte
 
-```java
-addRule(InputEvent.KeyPressed.class, (e, c) -> switch (e.code()) {
-    case KEY_K -> ...
-    case KEY_R -> ...
-    case KEY_C -> ...
-    default -> this;
-});
-```
+**1. `DiagramService` ist eine God-Class.**
+~700 Zeilen, ein Feld `objects` + `connections`, und die Methoden decken Anlegen, Bewegen, Resize, Verbinden, Löschen mit Kaskade, Texte und die komplette `DiagramQuery` ab. Das ist die einzige Stelle, wo die Einbahnstraße teuer wird: Zerlegen in `ConnectionService`, `TextService`, `DeletionCascadeService` würde die Datei halbieren — aber dann müsste man entscheiden, wer `objects` besitzt. Vielleicht als `DeletionService` ausgelagert (bekommt `objects`/`connections` per Konstruktor als Read-Write, aber publiziert nur Fakten), wäre ein gangbarer Weg. Oder als `package-private` Helfer mit klarem Vertrag.
 
-Diese Regel hat **keinen expliziten Guard** (also `(e, c) -> true`), greift damit auf *jedes* `KeyPressed`-Event. In den anderen ToolStates hast du genau das bewusst vermieden (siehe Kommentar im `ConnectToolState`: *„kein default-Switch, der ESC/Vorhandenes überlappen könnte"*).
+**2. Die zweiphasige Initialisierung ist fehleranfällig.**
+`attachTo(bus)` nach `new DiagramService()` — vergisst man es, ist der Service stumm, und man debuggt eine Weile. Das ist in Tests nicht passiert (weil du dort konsequent attachst), aber in Produktion ist der Fehler still. Ein `BusFactory.wire(...)`-Helfer, der die Paare zusammenbaut und das Erstellen ohne `attachTo` verbietet, wäre robuster.
 
-Sobald du in `IdleToolState` eine ESC-Regel ergänzt (z. B. „Auswahl aufheben"), hast du **zwei** Regeln, die auf `KeyPressed(ESCAPE)` matchen – und `BaseState` wirft `IllegalStateException`. Das ist zwar besser als stilles Fehlverhalten, aber der Crash kommt zur Laufzeit und ist ärgerlich.
+**3. `RequestCameraPan` hardcodet `PRIMARY`.**
+`PendingCreateOrPanState` publiziert `RequestCameraPan(startX, startY, CustomMouseButton.PRIMARY)` — weil es weiß, dass die Geste von einem Linksklick kam. Das ist heute korrekt, aber sobald jemand „Space+Drag" oder „Rechtsklick+Drag zum Pan" ergänzt, wird der hardgecodete Wert falsch. Den Button in den `PendingCreateOrPanState`-Konstruktor durchzureichen (von der `MousePressed`-Regel) wäre eine 3-Zeilen-Änderung mit großer Wirkung.
 
-**Vorschlag:** Entweder den Switch in diskrete, guard-getrennte Regeln auflösen (wie in den anderen States), oder – besser – in `ToolState` zentralisieren (siehe #1). Damit verschwindet auch dieser Footgun.
+**4. Modellwissen im State.**
+`IdleToolState` ruft `findTextIdsOwnedBy(targetId)` auf, um `movingIds` zu berechnen. Das ist im Kern die richtige Stelle („was bedeutet Drag auf Objekt X"), aber es koppelt den State an die Owner-Semantik. Wenn später eine `MovePolicy` dazukommt (z. B. „Waypoints eines selektierten Waypoints bewegen sich mit"), wächst das hier unkontrolliert. Ein `SelectionExpander` (oder eine Methode auf `SelectionQuery`, die die effektive Move-Menge liefert) wäre die sauberere Grenze.
 
-### 3. `CameraInfo.defaultLayerId` gehört nicht zur Kamera 🟡
+**5. `ToolType.NONE`.**
+Es taucht nur in `ToolState.registerToolSwitching` als `case SELECT, NONE -> IdleToolState` auf. Was ist die Semantik? Wenn das ein Platzhalter für „kein Werkzeug aktiv, aber nicht Select" ist, wäre `Optional<ToolType>` oder „weglassen, bis es einen echten Fall gibt" besser. Ein Enum-Wert, den niemand setzt, ist eine Einladung für „ich setze ihn mal" — und dann weiß keiner, was passieren soll.
 
-Ein Layer hat nichts mit Zoom/Offset zu tun. Aktuell müssen alle States, die eine Layer-ID brauchen (`PendingCreateOrPanState`, `ConnectingState`), durch das `CameraInfo`-Record greifen – das wird sich später rächen, wenn Layer-Verwaltung (Sichtbarkeit, aktive Layer pro Dokument) dazukommt. 
+**6. `ConnectionRule` ist heute eine Regel mit einem `Optional<String>` — und es gibt keine zweite Regel.**
+Das ist ein guter Erweiterungspunkt, aber die konkrete Signatur (`source, target → Optional<String>` bekommt keine Connection-Info) limitiert, was man später prüfen kann (z. B. „max. eine ausgehende Verbindung pro Quelle"). Bevor die zweite Regel kommt, lohnt es sich zu überlegen, was sie brauchen wird.
 
-**Vorschlag:** `defaultLayerId` in einen eigenen `LayerQuery` (oder `DiagramConfig`) verschieben und über den `InteractionContext` separat injizieren. `CameraInfo` bleibt rein geometrisch (`zoom`, `offsetX`, `offsetY`).
+**7. `closeGesture()`-Helper dupliziert.**
+In `UndoRedoTest` und `ZOrderRestoreTest` jeweils als private Methode. Das ist ein 3-Zeilen-Duplikat, aber es zeigt: der Testaufbau könnte eine gemeinsame `BusTestSupport`-Klasse vertragen (Bus + Services + `closeGesture` + `addCircle`).
 
-### 4. `ConnectingState` hat keine Preview 🟠
+**8. `pending`-Gesten in `UndoService` sind input-getrieben.**
+`onBoundary` schließt bei `MousePressed/Released/KeyPressed`. Eine programmatische Änderung (z. B. ein zukünftiger `LoadDiagram`-Service) müsste selbst „eine Geste" markieren — sonst landet sie im gleichen `pending`-Eintrag wie der letzte Klick. Das ist heute kein Problem (weil es keinen programmatischen Schreiber außer Tests gibt), aber es ist eine stille Annahme, die man dokumentieren (oder mit `beginGesture()/endGesture()`-Aufrufen explizit machen) könnte.
 
-Während des Verbindungsaufbaus sammelt der State Waypoints in einer internen Liste – aber niemand kann sie sehen. Es gibt keine `WaypointsChanged`- oder `ConnectionPreview`-Fakten, und der State exponiert sich nicht selbst über den Context. Der User klickt also blind ins Leere, bis er auf einem Zielobjekt landet. Das ist kein Architektur-, sondern ein UX-Gap – aber es ist genau die Sorte Lücke, die später zu einem parallelen Preview-Mechanismus führt, der dann nebenher existiert.
+**9. Persistenz und Kamera.**
+`CameraInfo` lebt im Bus (nicht im Modell), Auswahl und Undo in eigenen Services. Das ist bewusst und richtig (Sitzungszustand ≠ Modellinhalt). Aber: Wenn es einen Save/Load-Pfad gibt (in den Docs noch nicht sichtbar), muss klar sein, was gespeichert wird. Kamera-Position? Auswahl? Undo-Historie definitiv nicht. Das wäre der Punkt, an dem ich die Grenze einmal explizit aufschreiben würde.
 
-**Vorschlag:** Eine der beiden Varianten:
+## Zwei Fragen, die ich dem Autor stellen würde
 
-- **Events:** `ActionEvent.WaypointAdded` / `ConnectionPreviewChanged` beim Hinzufügen publizieren; ein ViewMapper rendert daraus die Vorschau.
-- **Query:** `PreviewQuery` im `InteractionContext`, die von `ConnectingState` (via Context-Callback) aktuelle Waypoints + Mausposition liefert.
+1. **Wie sieht die `ViewMapper`-Schicht aus?** Der Bus liefert `DiagramEvent`s, aber die UI muss daraus Rendering-Aktionen ableiten. Wenn die UI direkt die Fakten abonniert, wiederholt sich die Typ-Dispatch-Logik aus dem Service. Wenn es einen `ViewMapper` gibt (der Fakten in View-Operationen übersetzt), wäre das die vierte Schicht — und ein guter Test für die Frage, ob die Event-Hierarchie vollständig ist.
 
-Ich würde zur Event-Variante greifen – sie passt zur bestehenden „Requests rein, Fakten raus"-Linie, und `ActionEvent.AddWaypoint` existiert bereits ungenutzt, was sehr nach geplantem Vorhaben aussieht.
-
-### 5. `IdleToolState`: einfacher Klick selektiert nicht 🟡
-
-In `PendingMoveState` steht als Kommentar:
-
-```java
-// Hier könnte optional ein Select-Event gefeuert werden:
-// c.publisher().publish(new ActionEvent.ObjectSelected(target.id()));
-```
-
-Aktuell selektiert nur der Doppelklick (via `ResizeModeState`). Ein einfacher Klick auf ein Objekt tut nichts. Das ist entweder ein bewusster Zwischenstand oder ein UX-Loch. Wichtig: Das fehlende Selection-Event ist **nicht** das Problem – das Problem ist, dass die *Semantik* von „Klick auf Objekt" jetzt in `PendingMoveState` (nichts tun) und `ResizeModeState` (auswählen + Resize) unterschiedlich ist. Wenn du später Selektionserweiterung (Shift-Klick) brauchst, hast du zwei Stellen, an denen du das einbauen musst.
-
-**Vorschlag:** Objekt-Klick (ohne Drag) sollte generell `SetSelection([id])` publizieren – an einer Stelle (`PendingMoveState`). Der Doppelklick in `IdleToolState` bleibt die Ausnahme (Resize-Mode-Einstieg).
-
-### 6. Modell-Records validieren ihre Werte nicht 🟡
-
-`Circle(radius)`, `Rectangle(width, height)` und `Connection` haben keine Validierung. `GridSpec` macht es richtig (Compact-Constructor wirft). Da alle Schreibpfade über den Bus laufen und `HandleDragState` clamped, ist es aktuell nicht akut – aber sobald du Serialisierung (Persistenz/Load) bekommst, fliegen ungültige Geometrien ungeprüft ins Modell. Eine stille 0/negative Größe ist deutlich schwerer zu finden als eine Exception beim Erzeugen.
-
-**Vorschlag:** Compact-Constructor für die Geometrie-Records:
-
-```java
-public Circle {
-    if (radius <= 0) throw new IllegalArgumentException("radius > 0");
-}
-```
-
-### 7. Kleinere Punkte
-
-- **`DiagramService.connections()`** ist eine öffentliche Klassenmethode, nicht im `ConnectionQuery`-Interface. Für UI/Tests bequem, aber die Schichtung „Query-Interfaces im model-Package" wird inkonsistent. Entweder konsequent `ConnectionQuery` einführen oder bewusst als Service-API dokumentieren.
-- **`ActionEvent.AddWaypoint`** ist totes Kapital (nie publiziert). Absicht oder Vorbereitung? Wenn Vorbereitung: kommentieren, sonst raus.
-- **`DiagramEvent.ObjectMovedApplied`** trägt `(id, x, y)`, `ObjectResizedApplied` trägt das ganze Objekt. Asymmetrie. Vermutlich weil Move inkrementell kommt (Delta-Events) und Resize nur final. Nachvollziehbar – aber ein kurzer Kommentar am Event würde künftigen Lesern helfen.
-- **Keine Tests sichtbar** – bei *dieser* Architektur ist Testen so leicht wie selten (reine `handleInput(event, context)`-Funktionen mit Mock-Context). Nutze das jetzt, solange die States klein sind. Insbesondere die Guard-Disjunktion sollte einen Test haben, der einen neuen State mit kollidierenden Regeln als Fail entlarvt.
-- **`InputEvent.MouseReleased` in `CameraPanningState`** reagiert auf *jede* Maustaste, nicht nur die, mit der das Panning gestartet wurde. Bei gleichzeitigem Drücken von Mittel + Links könnte das seltsam werden. Vermutlich irrelevant, aber `MouseReleased` ohne Button-Guard ist ein kleines Risiko.
+2. **Was passiert bei „Undo nach Laden"?** Wenn `UndoService` beim Start leer ist und `LoadDiagram` die Objekte über `AddElement` publiziert, würden sie als Undo-Ops im `pending` landen — es sei denn, `LoadDiagram` umgeht den Bus oder `UndoService` hat einen `suspendRecording()`-Modus. Beides wäre legitim, aber die Entscheidung sollte explizit sein.
 
 ## Fazit
 
-**Solide Basis mit zwei echten Aufräum-Baustellen (#1 und #2) und drei „jetzt oder nie"-Gelegenheiten (#4, #5, #6).**
+Das ist die Arbeit von jemandem, der **die Konsequenzen von Architekturentscheidungen zu Ende denkt** — und das ist deutlich seltener als guter Code. Besonders die Undo-Konstruktion (Fakten tragen Vor-Zustand, Undo ist nur ein weiterer Schreiber) und die Guard-Disjunktheits-Invariante zeigen Erfahrung mit den Fallen regelbasierter Systeme.
 
-Wenn du **nur eine** Sache machst: ziehe den Tool-Switch + die Shortcuts in einen `ToolState`-Abstrakt (Punkt #1). Das ist der einzige Punkt, der bei jedem neuen Feature zwangsweise schmerzt und dann nur noch mit Refactoring zu beheben ist.
+Die Hauptbaustelle ist `DiagramService` — nicht weil er schlecht wäre, sondern weil er der einzige Ort ist, an dem die Einbahnstraße zu einem Monolithen führt. Wenn das Projekt weiter wächst, würde ich dort zuerst schneiden. Die zweitwichtigste Baustelle ist die zweiphasige Init — sie ist heute diszipliniert, aber sie ist der Punkt, an dem ein neuer Mitentwickler am ehesten einen stillen Fehler einbaut.
 
-Wenn du **zwei** Sachen machst: zusätzlich die `IdleToolState`-Inkonsistenz (#2) beseitigen – die ist ein latenter Laufzeit-Crash, sobald du ESC dort ergänzt.
-
-Alles andere ist „Aufräumen beim nächsten Anlass" und kein Grund, den Bau zu stoppen.
-
-Und noch ein methodischer Tipp: die **Guard-Disjunktions-Invariante ist Gold** – halte sie auch in `ToolState` konsequent ein, sonst hast du das zentrale Qualitätsmerkmal des Projekts an der Stelle aufgegeben, an der die meisten Regeln leben.
+Für ein Hobby- oder Lernprojekt: sehr stark. Für ein Produkt: die God-Class und die stille Init müssten vor dem ersten externen Contributor adressiert werden.
