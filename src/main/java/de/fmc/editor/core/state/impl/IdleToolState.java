@@ -5,15 +5,15 @@ import de.fmc.editor.core.event.CustomKeyCode;
 import de.fmc.editor.core.event.CustomMouseButton;
 import de.fmc.editor.core.event.InputEvent;
 import de.fmc.editor.core.model.ToolType;
-import de.fmc.editor.core.state.rule.BaseState;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
-public final class IdleToolState extends BaseState {
+public final class IdleToolState extends ToolState {
 
     public IdleToolState() {
+        super(ToolType.SELECT);
         // 0. Doppelklick auf ein Objekt -> Auswahl + Resize-Modus (Handles).
         //    Guard-disjunkt zur einfachen Klick-Regel: clickCount 2 vs. 1.
         addRule(InputEvent.MousePressed.class,
@@ -74,10 +74,22 @@ public final class IdleToolState extends BaseState {
                     c.publisher().publish(new ActionEvent.SetSelection(newSelection));
 
                     // Verschiebe-Menge: die Auswahl, sofern sie das Ziel enthält
-                    // (Ctrl-Toggle-out zieht nur das Ziel selbst).
-                    List<UUID> movingIds = newSelection.contains(targetId)
+                    // (Ctrl-Toggle-out zieht nur das Ziel selbst) — plus die
+                    // externen Label der Basis-Objekte: Sie wandern mit ihrem
+                    // Owner, auch wenn sie selbst nicht selektiert sind.
+                    // Verankerte Texte filtert der DiagramService beim Move
+                    // still heraus (ihre Position ist abgeleitet).
+                    List<UUID> base = newSelection.contains(targetId)
                             ? newSelection
                             : List.of(targetId);
+                    List<UUID> movingIds = new ArrayList<>(base);
+                    for (UUID id : base) {
+                        for (UUID textId : c.diagram().findTextIdsOwnedBy(id)) {
+                            if (!movingIds.contains(textId)) {
+                                movingIds.add(textId);
+                            }
+                        }
+                    }
 
                     // Klick auf Objekt -> Verschieben vorbereiten
                     return new PendingMoveState(movingIds, e.x(), e.y());
@@ -92,26 +104,8 @@ public final class IdleToolState extends BaseState {
             return this;
         });
 
-        // Tool-Wechsel per Event (von UI Toolbar)
-        addRule(ActionEvent.SelectTool.class, (e, c) -> switch (e.tool()) {
-            case CIRCLE -> new CircleToolState();
-            case RECTANGLE -> new RectangleToolState();
-            case CONNECT -> new ConnectToolState();
-            case SELECT, NONE -> this;
-        });
-
-        // Shortcuts für Werkzeuge — eine Guard-disjunkte Regel pro Key
-        // (kein default-Switch: der würde auf JEDES KeyPressed matchen und
-        // jede künftige Regel — z. B. ESC — zur Laufzeit ambig machen)
-        addRule(InputEvent.KeyPressed.class,
-                e -> e.code() == CustomKeyCode.KEY_K,
-                (e, c) -> new CircleToolState());
-        addRule(InputEvent.KeyPressed.class,
-                e -> e.code() == CustomKeyCode.KEY_R,
-                (e, c) -> new RectangleToolState());
-        addRule(InputEvent.KeyPressed.class,
-                e -> e.code() == CustomKeyCode.KEY_C,
-                (e, c) -> new ConnectToolState());
+        // Werkzeug-Wechsel (Toolbar + Shortcuts) — zentral in ToolState
+        registerToolSwitching();
 
         // ESC -> Auswahl aufheben (Zustand bleibt). Gefahrlos, da seit dem
         // 27.10. alle KeyPressed-Regeln Guard-disjunkt sind.

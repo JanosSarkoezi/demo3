@@ -2,7 +2,8 @@ package de.fmc.editor.core.event;
 
 import de.fmc.editor.core.model.Connection;
 import de.fmc.editor.core.model.DiagramObject;
-import de.fmc.editor.core.model.ToolType; // Enum: SELECT, CIRCLE, RECTANGLE, CONNECT
+import de.fmc.editor.core.model.TextAnchor;
+import de.fmc.editor.core.model.ToolType; // Enum: SELECT, CIRCLE, RECTANGLE, CONNECT, TEXT
 import de.fmc.editor.core.model.Waypoint;
 
 import java.util.List;
@@ -81,6 +82,56 @@ public sealed interface ActionEvent extends DomainEvent {
 
     /** Entfernt NUR die genannten Connections — ohne Waypoint-Kaskade (präzises Inverse). */
     record RemoveConnections(List<UUID> ids) implements ActionEvent {
+    }
+
+    // --- Text: Innere Texte (Felder auf K/R) und Text-Objekte ---
+
+    /** Setzt den inneren Text eines Kreises (per Konvention ein Buchstabe; das Modell bleibt permissiv). */
+    record SetCircleLabel(UUID id, String label) implements ActionEvent {
+    }
+
+    /** Setzt den inneren mehrzeiligen Text eines Rechtecks inkl. Zentrierungs-Schalter. */
+    record SetRectangleContent(UUID id, String content, boolean centered) implements ActionEvent {
+    }
+
+    /** Aktualisiert Inhalt und (von der UI gemessene) Box eines Text-Objekts — Position unverändert. */
+    record UpdateText(UUID id, String content, double width, double height) implements ActionEvent {
+    }
+
+    /** Verankert ein Text-Objekt neu an einem Verbindungsabschnitt — oder löst
+     *  den Anker (anchor = null: absolut, Position bleibt, wo sie ist).
+     *  Der Service leitet x/y aus der aktuellen Verbindungskette ab. */
+    record SetAnchor(UUID id, TextAnchor anchor) implements ActionEvent {
+    }
+
+    /** Erzeugt ein Verbindungs-Label (maximal eins je Connection, prüft das
+     *  Werkzeug): Der Service leitet x/y aus dem Anker ab. */
+    record AddAnchoredText(UUID connectionId, String content, TextAnchor anchor,
+                           double width, double height, UUID layerId) implements ActionEvent {
+    }
+
+    // --- UI-Intents für den Inline-Editor ---
+    // NOCH OHNE Service-Konsument: Der DiagramService ignoriert sie still.
+    // Die spätere UI abonniert sie, öffnet den Editor an der letzten
+    // Klick-Position (behält sie selbst) und publiziert beim Commit die
+    // passenden Requests von oben (SetCircleLabel, AddAnchoredText, ...).
+    // ESC im Editor verbraucht die UI selbst — erreicht den Core nie.
+
+    /** Editor-Intent: Inneren Text dieses K/R bearbeiten. */
+    record EditTextOfObject(UUID objectId) implements ActionEvent {
+    }
+
+    /** Editor-Intent: Dieses bestehende Text-Objekt bearbeiten. */
+    record EditText(UUID textId) implements ActionEvent {
+    }
+
+    /** Editor-Intent: Neues absolutes Text-Feld anlegen (ownerId = null: freier Text,
+     *  sonst externes Label unterhalb des Owner-Objekts). */
+    record CreateTextFor(UUID ownerId) implements ActionEvent {
+    }
+
+    /** Editor-Intent: Neues Verbindungs-Label — der Anker wurde vom Werkzeug projiziert. */
+    record CreateConnectionText(UUID connectionId, TextAnchor anchor) implements ActionEvent {
     }
 
     // --- Undo/Redo (UI übersetzt Shortcuts wie CTRL+Z / SHIFT+CTRL+Z hierher) ---

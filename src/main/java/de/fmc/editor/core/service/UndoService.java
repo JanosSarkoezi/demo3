@@ -8,6 +8,7 @@ import de.fmc.editor.core.model.Circle;
 import de.fmc.editor.core.model.Connection;
 import de.fmc.editor.core.model.DiagramObject;
 import de.fmc.editor.core.model.Rectangle;
+import de.fmc.editor.core.model.Text;
 import de.fmc.editor.core.model.Waypoint;
 
 import java.util.ArrayDeque;
@@ -52,13 +53,15 @@ public class UndoService {
 
     /** Eine undo-fähige Operation, abgeleitet aus einem Fakt (oder gemergten Fakten). */
     private sealed interface UndoOp permits AddedObject, AddedConnection, MovedObject,
-            MovedObjects, ResizedObject, RemovedObjects, RemovedConnections, UpdatedConnections {}
+            MovedObjects, ResizedObject, TextChanged, RemovedObjects, RemovedConnections,
+            UpdatedConnections {}
 
     private record AddedObject(DiagramObject object) implements UndoOp {}
     private record AddedConnection(Connection connection) implements UndoOp {}
     private record MovedObject(UUID id, double oldX, double oldY, double newX, double newY) implements UndoOp {}
     private record MovedObjects(List<DiagramEvent.ObjectMoved> moves) implements UndoOp {}
     private record ResizedObject(DiagramObject previous, DiagramObject resized) implements UndoOp {}
+    private record TextChanged(DiagramObject previous, DiagramObject updated) implements UndoOp {}
     private record RemovedObjects(List<DiagramObject> objects, List<Integer> zIndices) implements UndoOp {}
     private record RemovedConnections(List<Connection> connections) implements UndoOp {}
     private record UpdatedConnections(List<Connection> previous, List<Connection> updated) implements UndoOp {}
@@ -85,6 +88,7 @@ public class UndoService {
         bus.subscribe(DiagramEvent.ObjectsMoved.class, this::onMovedBatch);
         bus.subscribe(DiagramEvent.ObjectResized.class,
                 fact -> record(new ResizedObject(fact.previous(), fact.resized())));
+        bus.subscribe(DiagramEvent.ObjectTextChanged.class, this::onTextChanged);
         bus.subscribe(DiagramEvent.ConnectionEstablished.class,
                 fact -> record(new AddedConnection(fact.connection())));
         bus.subscribe(DiagramEvent.ObjectsRemoved.class,
@@ -159,6 +163,22 @@ public class UndoService {
             return;
         }
         record(new MovedObjects(fact.movedObjects()));
+    }
+
+    private void onTextChanged(DiagramEvent.ObjectTextChanged fact) {
+        if (replaying) {
+            return;
+        }
+        // Merge: aufeinanderfolgende Text-Änderungen desselben Objekts sind
+        // EINE Geste (z. B. Re-Ankerung in Drag-Segmenten): Vor-Zustand aus
+        // der ersten, Nach-Zustand aus der letzten Änderung.
+        if (!pending.isEmpty() && pending.getLast() instanceof TextChanged merge
+                && merge.updated().id().equals(fact.updated().id())) {
+            redoStack.clear();
+            pending.set(pending.size() - 1, new TextChanged(merge.previous(), fact.updated()));
+            return;
+        }
+        record(new TextChanged(fact.previous(), fact.updated()));
     }
 
     private boolean sameIds(List<DiagramEvent.ObjectMoved> a,
@@ -236,6 +256,7 @@ public class UndoService {
                 }
             }
             case ResizedObject resize -> bus.publish(resizeRequest(resize.previous()));
+            case TextChanged text -> publishTextState(text.previous());
             case RemovedObjects removed -> bus.publish(
                     new ActionEvent.RestoreObjects(removed.objects(), removed.zIndices()));
             case RemovedConnections removed -> removed.connections().forEach(
@@ -257,6 +278,7 @@ public class UndoService {
                 }
             }
             case ResizedObject resize -> bus.publish(resizeRequest(resize.resized()));
+            case TextChanged text -> publishTextState(text.updated());
             case RemovedObjects removed -> bus.publish(new ActionEvent.DeleteObjects(
                     removed.objects().stream().map(DiagramObject::id).toList()));
             case RemovedConnections removed -> bus.publish(new ActionEvent.RemoveConnections(
@@ -270,8 +292,37 @@ public class UndoService {
         return switch (target) {
             case Circle c -> new ActionEvent.ResizeCircle(c.id(), c.radius());
             case Rectangle r -> new ActionEvent.ResizeObject(r.id(), r.width(), r.height());
+            case Text t -> new ActionEvent.ResizeObject(t.id(), t.width(), t.height());
             // Waypoints haben keine Handles — der Service ignoriert das still.
             case Waypoint w -> new ActionEvent.ResizeObject(w.id(), 0.0, 0.0);
         };
+    }
+
+    /**
+     * Stellt einen Text-Zustand mechanisch wieder her (Undo-Inverse wie Redo-
+     * Replay verwenden denselben Pfad): Inhalt und Box immer; Anker und
+     * Position nur, soweit sie zu diesem Objekttyp gehören. Bei absoluten
+     * Texten setzt SetAnchor(null) den Anker frei, MoveObjectTo stellt die
+     * Original-Position zurück (kein Float-Drift); bei verankerten Texten
+     * leitet SetAnchor(anchor) die Position aus der wiederhergestellten
+     * Geometrie ab (LIFO-Disziplin des Undo garantiert deren Zustand).
+     */
+    private void publishTextState(DiagramObject state) {
+        switch (state) {
+            case Circle c -> bus.publish(new ActionEvent.SetCircleLabel(c.id(), c.label()));
+            case Rectangle r -> bus.publish(new ActionEvent.SetRectangleContent(
+                    r.id(), r.content(), r.centered()));
+            case Text t -> {
+                bus.publish(new ActionEvent.UpdateText(t.id(), t.content(), t.width(), t.height()));
+                if (t.anchor() != null) {
+                    bus.publish(new ActionEvent.SetAnchor(t.id(), t.anchor()));
+                } else {
+                    bus.publish(new ActionEvent.SetAnchor(t.id(), null));
+                    bus.publish(new ActionEvent.MoveObjectTo(t.id(), t.x(), t.y()));
+                }
+            }
+            // Waypoints tragen keinen Text.
+            case Waypoint w -> { }
+        }
     }
 }

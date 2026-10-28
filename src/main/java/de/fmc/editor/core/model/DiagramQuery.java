@@ -19,4 +19,30 @@ public interface DiagramQuery {
     default List<DiagramObject> findObjectsInBounds(double minX, double minY, double maxX, double maxY) {
         return List.of();
     }
+
+    /**
+     * IDs aller Text-Objekte mit diesem Owner (K/R-Objekt oder Connection),
+     * in z-Ordnung. Default: leer — Stubs bleiben stumm.
+     */
+    default List<UUID> findTextIdsOwnedBy(UUID ownerId) {
+        return List.of();
+    }
+
+    /**
+     * Nächstgelegene Connection, deren Verbindungskette den Punkt höchstens
+     * `tolerance` Welt-Einheiten entfernt passiert (für Text-Klicks auf
+     * Verbindungen). Default: leer — Stubs bleiben stumm.
+     */
+    default Optional<UUID> findConnectionNear(double worldX, double worldY, double tolerance) {
+        return Optional.empty();
+    }
+
+    /**
+     * Projiziert einen Welt-Punkt auf die Verbindungskette: liefert den
+     * Anker (Abschnitt, t) plus Offset vom Linienpunkt zum Klick — die
+     * Platzierungs-Absicht für ein Verbindungs-Label. Default: leer.
+     */
+    default Optional<TextAnchor> projectOntoConnection(UUID connectionId, double worldX, double worldY) {
+        return Optional.empty();
+    }
 }

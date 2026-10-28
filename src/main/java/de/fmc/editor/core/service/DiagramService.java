@@ -8,6 +8,8 @@ import de.fmc.editor.core.model.Connection;
 import de.fmc.editor.core.model.DiagramObject;
 import de.fmc.editor.core.model.DiagramQuery;
 import de.fmc.editor.core.model.Rectangle;
+import de.fmc.editor.core.model.Text;
+import de.fmc.editor.core.model.TextAnchor;
 import de.fmc.editor.core.model.Waypoint;
 
 import java.util.ArrayList;
@@ -75,6 +77,11 @@ public class DiagramService implements DiagramQuery {
         bus.subscribe(ActionEvent.MoveObjects.class, this::onMoveObjects);
         bus.subscribe(ActionEvent.AddConnection.class, this::onAddConnection);
         bus.subscribe(ActionEvent.RemoveConnections.class, this::onRemoveConnections);
+        bus.subscribe(ActionEvent.SetCircleLabel.class, this::onSetCircleLabel);
+        bus.subscribe(ActionEvent.SetRectangleContent.class, this::onSetRectangleContent);
+        bus.subscribe(ActionEvent.UpdateText.class, this::onUpdateText);
+        bus.subscribe(ActionEvent.SetAnchor.class, this::onSetAnchor);
+        bus.subscribe(ActionEvent.AddAnchoredText.class, this::onAddAnchoredText);
     }
 
     // ---------- Schreibpfad: ActionEvents (Requests) konsumieren ----------
@@ -114,8 +121,10 @@ public class DiagramService implements DiagramQuery {
         List<DiagramEvent.ObjectMoved> applied = new ArrayList<>();
         for (UUID id : event.ids()) {
             DiagramObject current = objects.get(id);
-            if (current == null) {
-                continue; // Unbekannte ID still ignorieren — kein Crash
+            if (current == null || isAnchored(current)) {
+                continue; // Unbekannte ID still ignorieren; verankerte Texte
+                          // bewegen sich NUR durch Re-Ankerung (SetAnchor),
+                          // ihre Position ist abgeleitet.
             }
             double oldX = current.x();
             double oldY = current.y();
@@ -129,6 +138,9 @@ public class DiagramService implements DiagramQuery {
     }
 
     private void applyMove(DiagramObject current, double targetX, double targetY) {
+        if (isAnchored(current)) {
+            return; // Verankerte Texte sind nicht delta-verschiebbar.
+        }
         double oldX = current.x();
         double oldY = current.y();
         DiagramObject moved = moved(current, targetX - oldX, targetY - oldY);
@@ -136,20 +148,34 @@ public class DiagramService implements DiagramQuery {
         publishFact(new DiagramEvent.ObjectMoved(moved.id(), oldX, oldY, moved.x(), moved.y()));
     }
 
+    /** Verankerte Texte sind abgeleitete Positionen — nie direkte Move-Ziele. */
+    private boolean isAnchored(DiagramObject obj) {
+        return obj instanceof Text text && text.anchor() != null;
+    }
+
     private void onResizeObject(ActionEvent.ResizeObject event) {
-        if (objects.get(event.id()) instanceof Rectangle rectangle) {
-            Rectangle resized = new Rectangle(rectangle.id(), rectangle.x(), rectangle.y(),
-                    event.newWidth(), event.newHeight(), rectangle.layerId());
-            objects.put(resized.id(), resized);
-            publishFact(new DiagramEvent.ObjectResized(rectangle, resized));
+        DiagramObject current = objects.get(event.id());
+        DiagramObject resized = null;
+        if (current instanceof Rectangle rectangle) {
+            resized = new Rectangle(rectangle.id(), rectangle.x(), rectangle.y(),
+                    event.newWidth(), event.newHeight(), rectangle.content(),
+                    rectangle.centered(), rectangle.layerId());
+        } else if (current instanceof Text text) {
+            // Text-Box: nur Maße ändern — Anker/Owner/Position bleiben.
+            resized = new Text(text.id(), text.content(), text.x(), text.y(),
+                    event.newWidth(), event.newHeight(), text.anchor(), text.ownerId(), text.layerId());
         }
-        // Kein Rectangle (oder unbekannte ID) => kein Fakt, nichts passiert.
+        if (resized != null) {
+            objects.put(resized.id(), resized);
+            publishFact(new DiagramEvent.ObjectResized(current, resized));
+        }
+        // Keine Box (oder unbekannte ID) => kein Fakt, nichts passiert.
     }
 
     private void onResizeCircle(ActionEvent.ResizeCircle event) {
         if (objects.get(event.id()) instanceof Circle circle) {
             Circle resized = new Circle(circle.id(), circle.x(), circle.y(),
-                    event.newRadius(), circle.layerId());
+                    event.newRadius(), circle.label(), circle.layerId());
             objects.put(resized.id(), resized);
             publishFact(new DiagramEvent.ObjectResized(circle, resized));
         }
@@ -217,6 +243,18 @@ public class DiagramService implements DiagramQuery {
                         .forEach(conn -> collectConnectionCascade(conn, doomedObjects, doomedConnections));
             }
             doomedObjects.putIfAbsent(obj.id(), obj);
+        }
+
+        // Phase 1b — Text-Kaskade: Texte, deren Owner (Objekt ODER Connection)
+        // selbst doomed ist, gehören mit zur Lösch-Geste — als sichtbarer
+        // Fakt, nicht versteckt (demo2-Lektion: Kaskade und Undo dürfen nie
+        // auseinanderdriften, also lebt sie ausschließlich hier).
+        for (DiagramObject obj : objects.values()) {
+            if (obj instanceof Text text && text.ownerId() != null
+                    && (doomedObjects.containsKey(text.ownerId())
+                        || doomedConnections.containsKey(text.ownerId()))) {
+                doomedObjects.putIfAbsent(text.id(), text);
+            }
         }
         if (doomedObjects.isEmpty()) {
             return;
@@ -328,6 +366,72 @@ public class DiagramService implements DiagramQuery {
         }
     }
 
+    // ---------- Text-Schreibpfad ----------
+
+    private void onSetCircleLabel(ActionEvent.SetCircleLabel event) {
+        if (objects.get(event.id()) instanceof Circle circle) {
+            Circle updated = new Circle(circle.id(), circle.x(), circle.y(),
+                    circle.radius(), event.label(), circle.layerId());
+            objects.put(updated.id(), updated);
+            publishFact(new DiagramEvent.ObjectTextChanged(circle, updated));
+        }
+        // Kein Circle (oder unbekannte ID) => kein Fakt, nichts passiert.
+    }
+
+    private void onSetRectangleContent(ActionEvent.SetRectangleContent event) {
+        if (objects.get(event.id()) instanceof Rectangle rectangle) {
+            Rectangle updated = new Rectangle(rectangle.id(), rectangle.x(), rectangle.y(),
+                    rectangle.width(), rectangle.height(),
+                    event.content(), event.centered(), rectangle.layerId());
+            objects.put(updated.id(), updated);
+            publishFact(new DiagramEvent.ObjectTextChanged(rectangle, updated));
+        }
+    }
+
+    private void onUpdateText(ActionEvent.UpdateText event) {
+        if (objects.get(event.id()) instanceof Text text) {
+            Text updated = new Text(text.id(), event.content(), text.x(), text.y(),
+                    event.width(), event.height(), text.anchor(), text.ownerId(), text.layerId());
+            objects.put(updated.id(), updated);
+            publishFact(new DiagramEvent.ObjectTextChanged(text, updated));
+        }
+    }
+
+    /**
+     * Re-Ankerung eines Textes: Der Service leitet x/y aus der AKTUELLEN
+     * Verbindungskette ab (Geometrie-Wissen liegt zentral hier, nie in den
+     * States). anchor = null löst den Anker — die Position bleibt, wo sie
+     * ist (absolut ab jetzt); das ist bewusst anders als beim Setzen eines
+     * Ankers, weil das Lösen ein reines Undo-Inverse ist.
+     */
+    private void onSetAnchor(ActionEvent.SetAnchor event) {
+        if (!(objects.get(event.id()) instanceof Text text)) {
+            return;
+        }
+        Text updated;
+        if (event.anchor() == null) {
+            updated = new Text(text.id(), text.content(), text.x(), text.y(),
+                    text.width(), text.height(), null, text.ownerId(), text.layerId());
+        } else {
+            double[] center = anchoredCenter(event.anchor(), text.ownerId());
+            updated = new Text(text.id(), text.content(), center[0], center[1],
+                    text.width(), text.height(), event.anchor(), text.ownerId(), text.layerId());
+        }
+        objects.put(updated.id(), updated);
+        publishFact(new DiagramEvent.ObjectTextChanged(text, updated));
+    }
+
+    private void onAddAnchoredText(ActionEvent.AddAnchoredText event) {
+        if (!connections.containsKey(event.connectionId())) {
+            return; // Ohne Connection kein Anker
+        }
+        double[] center = anchoredCenter(event.anchor(), event.connectionId());
+        Text text = new Text(UUID.randomUUID(), event.content(), center[0], center[1],
+                event.width(), event.height(), event.anchor(), event.connectionId(), event.layerId());
+        addToModel(text);
+        publishFact(new DiagramEvent.ObjectAdded(text));
+    }
+
     // ---------- Lesepfad: DiagramQuery implementieren ----------
 
     @Override
@@ -386,13 +490,81 @@ public class DiagramService implements DiagramQuery {
         return List.copyOf(zOrder);
     }
 
+    // ---------- Text-Lesepfad ----------
+
+    @Override
+    public List<UUID> findTextIdsOwnedBy(UUID ownerId) {
+        List<UUID> result = new ArrayList<>();
+        for (UUID id : zOrder) {
+            if (objects.get(id) instanceof Text text && ownerId.equals(text.ownerId())) {
+                result.add(text.id());
+            }
+        }
+        return result;
+    }
+
+    @Override
+    public Optional<UUID> findConnectionNear(double worldX, double worldY, double tolerance) {
+        UUID nearest = null;
+        double bestDistance = tolerance;
+        for (Connection conn : connections.values()) {
+            List<double[]> points = polyPoints(conn);
+            for (int i = 0; i + 1 < points.size(); i++) {
+                double distance = pointSegmentDistance(worldX, worldY,
+                        points.get(i), points.get(i + 1));
+                if (distance < bestDistance) {
+                    bestDistance = distance;
+                    nearest = conn.id();
+                }
+            }
+        }
+        return Optional.ofNullable(nearest);
+    }
+
+    @Override
+    public Optional<TextAnchor> projectOntoConnection(UUID connectionId, double worldX, double worldY) {
+        Connection conn = connections.get(connectionId);
+        if (conn == null) {
+            return Optional.empty();
+        }
+        List<double[]> points = polyPoints(conn);
+        if (points.size() < 2) {
+            return Optional.empty();
+        }
+        int bestSegment = 0;
+        double bestT = 0.0;
+        double bestDistance = Double.MAX_VALUE;
+        double[] bestPoint = null;
+        for (int i = 0; i + 1 < points.size(); i++) {
+            double[] projected = projectPointOnSegment(worldX, worldY,
+                    points.get(i), points.get(i + 1));
+            double distance = Math.hypot(worldX - projected[0], worldY - projected[1]);
+            if (distance < bestDistance) {
+                bestDistance = distance;
+                bestSegment = i;
+                bestT = projected[2];
+                bestPoint = projected;
+            }
+        }
+        // Offset = Klick − Ankerpunkt: Das Label soll dort sitzen, wo der
+        // Benutzer geklickt hat (Kreation frei — Snapping greift erst beim
+        // Verschieben).
+        return Optional.of(new TextAnchor(bestSegment, bestT,
+                worldX - bestPoint[0], worldY - bestPoint[1]));
+    }
+
     // ---------- interne Helfer ----------
 
-    /** Kopie mit verschobenen Koordinaten — Pattern Matching statt Factory-Klasse. */
+    /** Kopie mit verschobenen Koordinaten — Pattern Matching statt Factory-Klasse.
+     *  Trägt ALLE Felder mit (auch label/content) — die Kompatibilitäts-
+     *  Konstruktoren würden sie sonst still zurücksetzen. */
     private DiagramObject moved(DiagramObject obj, double dx, double dy) {
         return switch (obj) {
-            case Circle c    -> new Circle(c.id(), c.x() + dx, c.y() + dy, c.radius(), c.layerId());
-            case Rectangle r -> new Rectangle(r.id(), r.x() + dx, r.y() + dy, r.width(), r.height(), r.layerId());
+            case Circle c    -> new Circle(c.id(), c.x() + dx, c.y() + dy, c.radius(), c.label(), c.layerId());
+            case Rectangle r -> new Rectangle(r.id(), r.x() + dx, r.y() + dy, r.width(), r.height(),
+                    r.content(), r.centered(), r.layerId());
+            case Text t      -> new Text(t.id(), t.content(), t.x() + dx, t.y() + dy,
+                    t.width(), t.height(), t.anchor(), t.ownerId(), t.layerId());
             case Waypoint w  -> new Waypoint(w.id(), w.x() + dx, w.y() + dy, w.layerId());
         };
     }
@@ -403,6 +575,8 @@ public class DiagramService implements DiagramQuery {
             case Circle c    -> Math.hypot(worldX - c.x(), worldY - c.y()) <= c.radius();
             case Rectangle r -> Math.abs(worldX - r.x()) <= r.width() / 2
                              && Math.abs(worldY - r.y()) <= r.height() / 2;
+            case Text t      -> Math.abs(worldX - t.x()) <= t.width() / 2
+                             && Math.abs(worldY - t.y()) <= t.height() / 2;
             case Waypoint w  -> Math.hypot(worldX - w.x(), worldY - w.y()) <= 5.0;
         };
     }
@@ -414,8 +588,70 @@ public class DiagramService implements DiagramQuery {
                              && c.y() + c.radius() >= minY && c.y() - c.radius() <= maxY;
             case Rectangle r -> r.x() + r.width() / 2 >= minX && r.x() - r.width() / 2 <= maxX
                              && r.y() + r.height() / 2 >= minY && r.y() - r.height() / 2 <= maxY;
+            case Text t      -> t.x() + t.width() / 2 >= minX && t.x() - t.width() / 2 <= maxX
+                             && t.y() + t.height() / 2 >= minY && t.y() - t.height() / 2 <= maxY;
             case Waypoint w  -> false; // oben gefiltert — der Vollständigkeit halber
         };
+    }
+
+    /** Punkte der Verbindungskette: Quelle, Waypoints, Ziel (Welt-Koordinaten). */
+    private List<double[]> polyPoints(Connection conn) {
+        List<double[]> points = new ArrayList<>();
+        DiagramObject source = objects.get(conn.sourceId());
+        if (source != null) {
+            points.add(new double[]{source.x(), source.y()});
+        }
+        for (UUID waypointId : conn.waypointIds()) {
+            DiagramObject waypoint = objects.get(waypointId);
+            if (waypoint != null) {
+                points.add(new double[]{waypoint.x(), waypoint.y()});
+            }
+        }
+        DiagramObject target = objects.get(conn.targetId());
+        if (target != null) {
+            points.add(new double[]{target.x(), target.y()});
+        }
+        return points;
+    }
+
+    /** Position eines verankerten Textes: Ankerpunkt auf der Kette plus
+     *  Feinjustierung. Fällt ein Abschnitt weg (W gelöscht), klemmt der
+     *  Index auf den letzten Abschnitt — t und Offset bleiben als Absicht. */
+    private double[] anchoredCenter(TextAnchor anchor, UUID connectionId) {
+        Connection conn = connections.get(connectionId);
+        if (conn == null) {
+            return new double[]{0.0, 0.0}; // Ohne Verbindung kein Anker — defensiv
+        }
+        List<double[]> points = polyPoints(conn);
+        if (points.size() < 2) {
+            return points.isEmpty()
+                    ? new double[]{0.0, 0.0}
+                    : new double[]{points.get(0)[0], points.get(0)[1]};
+        }
+        int segment = Math.clamp(anchor.segmentIndex(), 0, points.size() - 2);
+        double[] a = points.get(segment);
+        double[] b = points.get(segment + 1);
+        return new double[]{
+                a[0] + anchor.t() * (b[0] - a[0]) + anchor.offsetX(),
+                a[1] + anchor.t() * (b[1] - a[1]) + anchor.offsetY()
+        };
+    }
+
+    /** Abstand Punkt -> Strecke. */
+    private double pointSegmentDistance(double px, double py, double[] a, double[] b) {
+        double[] projected = projectPointOnSegment(px, py, a, b);
+        return Math.hypot(px - projected[0], py - projected[1]);
+    }
+
+    /** Projektion auf die Strecke a->b; [2] = Parameter t [0..1]. */
+    private double[] projectPointOnSegment(double px, double py, double[] a, double[] b) {
+        double abx = b[0] - a[0];
+        double aby = b[1] - a[1];
+        double lengthSquared = abx * abx + aby * aby;
+        double t = lengthSquared == 0.0
+                ? 0.0
+                : Math.clamp(((px - a[0]) * abx + (py - a[1]) * aby) / lengthSquared, 0.0, 1.0);
+        return new double[]{a[0] + t * abx, a[1] + t * aby, t};
     }
 
     private void publishFact(DiagramEvent fact) {

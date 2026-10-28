@@ -503,3 +503,72 @@ Chronik der Arbeitssessions. Format: Datum / Was / Warum so / Grenzen & Verbesse
 - Die DEVLOG-Chronik behält historisch bedingte alte Namen (Chronik wird
   nicht umgeschrieben).
 - `mvn test`: 70/70 grün — reines Refactoring ohne Verhaltensänderung.
+
+## 28.10.2026 (4. Arbeitsblock) — Text-Feature: ToolState-Zentralisierung, Text-Modell, TextToolState
+
+**Was:**
+
+- **Block A — `ToolState`-Zentralisierung:** Abstrakte Basisklasse für alle
+  Werkzeug-States; Werkzeug-Wechsel per `SelectTool`-Event und Shortcuts
+  K/R/C/T genau einmal zentral, mit reflexivem self-Check. Idle/Circle/
+  Rectangle/Connect auf die neue Basis verschlankt — verhaltensidentisch
+  (70/70 grün danach).
+- **Block B — Text-Modell:** `Text` (Record, implements DiagramObject) mit
+  Mittelpunkt-Konvention (x/y = Box-Zentrum, uniform mit K/R), `ownerId`
+  (K/R, Connection oder null = frei), nullable `anchor` (`TextAnchor`:
+  segmentIndex, t, offsetX/Y). `Circle` + `label`, `Rectangle` + `content`/
+  `centered` (Kompat-Konstruktoren für Bestands-Fixtures).
+  DiagramService: 5 neue Request-Handler (`SetCircleLabel`,
+  `SetRectangleContent`, `UpdateText`, `SetAnchor`, `AddAnchoredText`),
+  Anker-Ableitung zentral im Service (`polyPoints` + Projektion), Phase-1b-
+  Text-Kaskade beim Löschen (Owned-Texte doomeder Objekte UND Connections),
+  verankerte Texte nicht delta-verschiebbar, 3 neue Queries auf
+  `DiagramQuery` (Defaults leer für Stubs): `findTextIdsOwnedBy`,
+  `findConnectionNear`, `projectOntoConnection`. `ObjectTextChanged`-Fakt
+  (previous + updated) + `TextChanged`-Undo-Op mit Merge und mechanischer
+  Inversion (`publishTextState`).
+- **Block C — `TextToolState`:** ToolType.TEXT + KEY_T; EINE Press-Regel
+  mit Verzweigungen in der Aktion (Guard-Disjunktheit per Konstruktion —
+  User-Forderung): Klick K/R → `EditTextOfObject`, Ctrl+Klick K/R →
+  `CreateTextFor(owner)` (Label unterhalb, Default vom User bestätigt),
+  Klick Text → `EditText`, Verbindungsnähe → bestehendes Label bearbeiten
+  (0..1-Kardinalität) sonst `CreateConnectionText` mit projiziertem Anker,
+  Leere → `CreateTextFor(null)`. Intents sind UI-Intents ohne Service-
+  Konsument (dokumentiert). IdleToolState: movingIds ∪ Owned-Texte.
+- **Bugfix nebenbei:** `moved()`/Resize trugen label/content nicht mit —
+  Verschieben/Resizen hätte innere Texte still gelöscht (Kompat-Konstruktor-
+  Falle). Jetzt Feld-Mitführung + Regressionstest.
+- Tests: `TextModelTest` (14) + `TextToolTest` (8); **92/92 grün**.
+
+**Warum so:**
+
+- **Anker als nullable Feld statt Positions-Variante:** Die ursprüngliche
+  Idee (`TextPosition` sealed: Absolute | Anchored, x/y on demand abgeleitet)
+  scheiterte an `DiagramObject.x()/y()`: Ein verankertes Text-Record KANN
+  x/y ohne Service-Zugriff nicht beantworten. Materialisierte x/y + Anker
+  als Absicht hält das Interface intakt, Hit/Band/moved uniform — und x/y
+  kann heute nicht stale werden, weil Waypoints gar nicht beweglich sind
+  (W-Sichtbarkeit fehlt). Ehrlich als Phase dokumentiert: „Gleiten mit W"
+  folgt mit dem Layer-Feature, dann als Teil desselben `ObjectsMoved`-
+  Batch-Fakts (keine versteckte Kaskade — demo2-Lektion).
+- **Löschen ohne Erzeugung:** Das Text-Werkzeug erzeugt NICHTS im Modell,
+  bevor der Editor committet — die Intents tragen nur die Absicht. Cancel
+  (ESC im Editor) kostet damit keinen Modelleingriff; die UI publiziert beim
+  Commit die passenden Requests. Sauberer als demo2s Platzhalter-Text plus
+  Nach-Räumen.
+- **Intents ohne Konsumenten:** Bewusst gewagt, aber die Architektur sieht
+  UI-Docking über Fakten/Intents vor; die Gesten-Semantik ist so OHNE UI
+  per Event-Flow testbar (Goldene Regel 2) — sonst wäre das Werkzeug ein
+  untestbarer No-Op bis zum UI-Meilenstein.
+
+**Grenzen & Verbesserungskandidaten:**
+
+- `SetAnchor(null)` hält die aktuelle Position (reines Undo-Inverse) — ein
+  bewusster, dokumentierter Semantik-Unterschied zum Setzen eines Ankers.
+- Test-Gestaltungslektion: Direkt publizierte Setup-Requests (AddElement)
+  verschmelzen ohne Gesten-Grenze mit der Folgewirkung zu EINEM Undo-
+  Eintrag — Fixtures brauchen explizite Boundaries (`MouseReleased`) vor
+  Undo-Assertionen.
+- Move-Snapping (auch Text-Mittelpunkt) hängt am bestehenden Snapping-Block;
+  W-Gleiten und Serialisierung (Text/label/content ins DTO) sind offene,
+  in AGENTS.md verortete Folgeblöcke.

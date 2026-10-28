@@ -25,6 +25,11 @@ public sealed interface DiagramEvent extends DomainEvent {
     /** Trägt Vor- UND Nach-Zustand — der Vor-Zustand macht den Fakt invertierbar (Undo-Regel). */
     record ObjectResized(DiagramObject previous, DiagramObject resized) implements DiagramEvent {}
 
+    /** Text-Änderung: innerer Text von K/R (label/content/centered) oder
+     *  Inhalt/Box/Anker/Position eines Text-Objekts. Trägt Vor- UND
+     *  Nach-Zustand — invertierbar (Undo-Regel). */
+    record ObjectTextChanged(DiagramObject previous, DiagramObject updated) implements DiagramEvent {}
+
     record ConnectionEstablished(Connection connection) implements DiagramEvent {}
 
     record ConnectionRejected(UUID sourceId, UUID targetId, String reason) implements DiagramEvent {}

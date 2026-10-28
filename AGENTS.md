@@ -58,9 +58,23 @@ Die `spec.md` im `doc/`-Verzeichnis beschreibt die Zielversion des Editors. Kern
 ## 🏗️ Kernarchitektur (Ist-Zustand)
 
 ### 1. Datenmodell (Core, immutable)
-* **Sealed Interface `DiagramObject`** mit den Records `Circle`, `Rectangle`
-  und `Waypoint`. Alle sind immutable, threadsicher und frei von JavaFX-Imports.
-  `ToolType` (SELECT, CIRCLE, RECTANGLE, CONNECT, NONE) steuert die Werkzeuge.
+* **Sealed Interface `DiagramObject`** mit den Records `Circle`, `Rectangle`,
+  `Waypoint` und `Text`. Alle sind immutable, threadsicher und frei von JavaFX-Imports.
+  `ToolType` (SELECT, CIRCLE, RECTANGLE, CONNECT, TEXT, NONE) steuert die Werkzeuge.
+  * **`Circle`** trägt `label` (innerer Text, per Konvention 1 Buchstabe —
+    Modell permissiv, UI erzwingt), **`Rectangle`** trägt `content` +
+    `centered` (Default true; die innere Text-Box ist von der R-Geometrie
+    abgeleitet — Resize gratis). Kompatibilitäts-Konstruktoren ohne Text-
+    Felder halten Bestands-Fixtures kompilierbar; `moved()`/Resize tragen die
+    Text-Felder mit (Kompat-Konstruktor dort wäre ein stiller Datenverlust).
+  * **`Text`** (Record): eigener Text mit rechteckiger Box — x/y ist der
+    MITTELPUNKT (uniform mit K/R: Hit, Band, Move, Snap nach derselben
+    Konvention). `ownerId` referenziert ein K/R (externes Label, 0..n), eine
+    Connection (Verbindungs-Label, 0..1) oder nichts (freier Text).
+    `anchor` (nullable): null = absolut positioniert; gesetzt = an einem
+    Verbindungsabschnitt verankert (Position vom Service abgeleitet bei
+    Erzeugung/Re-Ankerung). **`TextAnchor`** (segmentIndex, t, offsetX/Y):
+    Index klemmt bei W-Löschung, t und Offset bleiben als Absicht erhalten.
 * **Datenhaltung im `DiagramService`** (`core.service`): implementiert das
   **read-only Interface `DiagramQuery`** (`findTopmostAt`, `findById`) —
   Details siehe Abschnitt 3.
@@ -95,12 +109,25 @@ drei Zweigen:
   das Zentrum bleibt garantiert erhalten), `CreateConnection` (mit
   Waypoint-Liste — der Service speichert die Waypoints als Objekte und
   referenziert sie per ID), `AddConnection` (Restore mit Original-ID),
-  `RemoveConnections` (ohne Kaskade — präzises Inverse), `RequestUndo` /
+  `RemoveConnections` (ohne Kaskade — präzises Inverse), Text-Requests:
+  `SetCircleLabel`, `SetRectangleContent` (inkl. centered-Schalter),
+  `UpdateText` (nur Inhalt/Box), `SetAnchor` (nullable TextAnchor — null =
+  Anker lösen, Position bleibt), `AddAnchoredText` (Service leitet x/y aus
+  dem Anker ab), `RequestUndo` /
   `RequestRedo` (UI übersetzt CTRL+Z / SHIFT+CTRL+Z hierher).
+* **UI-Intents auf dem Bus (noch ohne Service-Konsument):** `EditTextOfObject`
+  (innerer Text K/R), `EditText` (bestehendes Text-Objekt), `CreateTextFor`
+  (ownerId null = freier Text), `CreateConnectionText` (mit projiziertem
+  Anker). Das Text-Werkzeug emittiert sie; die spätere UI abonniert sie,
+  öffnet den Inline-Editor an der letzten Klick-Position (behält sie selbst)
+  und publiziert beim Commit die passenden Requests. ESC im Editor verbraucht
+  die UI selbst — erreicht den Core nie.
 * **`DiagramEvent`** (Fakten von Diagram- & SelectionService): Antwort auf
   Requests — `ObjectAdded`, `ObjectMoved` (Vor- UND Nach-Position),
   `ObjectsMoved` (Batch: ein Eintrag je Objekt einer Gruppenverschiebung),
-  `ObjectResized` (Vor- UND Nach-Zustand), `ConnectionEstablished`,
+  `ObjectResized` (Vor- UND Nach-Zustand), `ObjectTextChanged` (Vor- UND
+  Nach-Zustand: innerer Text von K/R oder Inhalt/Box/Anker/Position eines
+  Text-Objekts), `ConnectionEstablished`,
   `ConnectionRejected` (mit Begründung), `SelectionChanged`; plus
   Batch-Fakten einer Lösch-Geste mit vollständigem Zustand (Undo-Grundlage):
   `ObjectsRemoved` (inkl. kaskadierter Waypoints), `ConnectionsRemoved`,
@@ -132,6 +159,24 @@ bestätigte Änderungen als `DiagramEvent`s. Verbindungen validiert er zentral
 → `ConnectionRejected`). Zweiphasige Initialisierung gegen die Zirkularität
 Bus ↔ Service: `new DiagramService()` → `new InteractionEventBus(service, …)`
 → `service.attachTo(bus)`.
+* **Text-Schreibpfad:** `SetCircleLabel`/`SetRectangleContent`/`UpdateText`/
+  `SetAnchor`/`AddAnchoredText` → je ein `ObjectTextChanged`-Fakt (bzw.
+  `ObjectAdded`). Die Anker-Position leitet der Service zentral ab
+  (`polyPoints` + Projektion — Geometrie-Wissen liegt nie in den States);
+  `SetAnchor(null)` löst den Anker und hält die Position.
+* **Verankerte Texte sind nicht delta-verschiebbar:** `MoveObjects`/
+  `MoveObjectTo` überspringen Texte mit Anker still (ihre Position ist
+  abgeleitet; Änderung nur über Re-Ankerung).
+* **Lösch-Kaskade Phase 1b:** Texte, deren Owner (Objekt ODER Connection)
+  doomed ist, kaskadierten mit — als sichtbare Fakten in `ObjectsRemoved`,
+  nie versteckt (demo2-Lektion). Das gilt für K/R-Owner wie für
+  Connection-Owner.
+* **Text-Queries** (Default-Methoden auf `DiagramQuery`, überschrieben im
+  Service): `findTextIdsOwnedBy(ownerId)` (Move-Union + 0..1-Kardinalität),
+  `findConnectionNear(x, y, tolerance)` (Punkt-zu-Kette-Distanz — die
+  nächstgelegene Connection gewinnt), `projectOntoConnection(connectionId, x, y)` →
+  `TextAnchor` (Offset = Klick − Ankerpunkt: Das Label sitzt, wo geklickt
+  wurde — Kreation frei, Snapping greift erst beim Verschieben).
 
 ### 4. Auswahl, Grid & Handles (read-only im Interaktions-Kontext)
 * **`SelectionService`** (`core.service`): hält die geordnete, duplikatfreie
@@ -150,11 +195,20 @@ Bus ↔ Service: `new DiagramService()` → `new InteractionEventBus(service, �
   verschmelzen), fährt einen Replay-Guard gegen Selbst-Erfassung und leert
   den Redo-Stack bei neuen Aktionen. Kamera- und Auswahl-Fakten bleiben
   bewusst draußen (Sitzungszustand, kein Modellinhalt).
+  * **TextChanged-Op:** `ObjectTextChanged` → Op mit previous/updated; Merge
+    bei aufeinanderfolgenden Änderungen desselben Objekts (Re-Ankerung in
+    Drag-Segmenten = EIN Undo-Punkt). Inverse wie Replay laufen mechanisch
+    über `publishTextState`: K → `SetCircleLabel`, R → `SetRectangleContent`,
+    Text → `UpdateText` + `SetAnchor` (bei absoluten Texten zusätzlich
+    `SetAnchor(null)` + `MoveObjectTo` für die Original-Position — kein
+    Float-Drift; bei verankerten leitet der Service aus der per LIFO
+    wiederhergestellten Geometrie ab).
 * **`GridSpec`** (`core.model`, Record): Grid-Größe in Welt-Koordinaten;
   `snapToGrid(...)` rundet auf den nächsten Schnittpunkt. Heute Referenz für
   Minimalgrößen (kleinstes Objekt = 1 Zelle); Move-Snapping später.
-* **`HandlePositions`** (`core.model`): reine Griff-Geometrie — Rechteck 8
-  Griffe (Ecken + Seiten-Mitten), Kreis 4 (N/O/S/W), Waypoint keine.
+* **`HandlePositions`** (`core.model`): reine Griff-Geometrie — Rechteck und
+  Text-Box 8 Griffe (Ecken + Seiten-Mitten, gemeinsame `ofBox`), Kreis 4
+  (N/O/S/W), Waypoint keine.
   Zustandslos; von States (Hit-Test) und späterer UI (Rendering) genutzt.
 
 ### 5. `InteractionEventBus` — zwei parallele State-Machines
@@ -194,11 +248,23 @@ ein `BaseStateTest` beweist die Invariante direkt. Konsequenzen:
 * Guards müssen seiteneffektfrei sein (der Dispatcher wertet alle aus).
 * Bewusste „keine-Regel-passt"-Reste sind erlaubt — der Zustand bleibt einfach.
 
-* **Tool-States** (`core.state.impl`): `IdleToolState` (Zoom, Tool-Wechsel,
-  Shortcuts K/R/C, Hit-Test, Selektion bei Press — einfach = exklusiv,
+* **`ToolState`** (`core.state.impl`, abstrakt): gemeinsame Basis aller
+  Werkzeug-States — zentralisiert Werkzeug-Wechsel per `SelectTool`-Event
+  (Toolbar) und per Shortcuts K/R/C/T mit reflexivem self-Check (im eigenen
+  Werkzeug bleibt der State). Guard-disjunkt: eine Regel pro Key, kein
+  default-Switch (zuvor in jedem State dupliziert — größte demo2-Baustelle).
+* **Tool-States** (`core.state.impl`): `IdleToolState` (Zoom, Hit-Test,
+  Selektion bei Press — einfach = exklusiv,
   Ctrl+Klick = Toggle, Leere/ESC = leeren —, DEL = Auswahl löschen,
-  Doppelklick → `ResizeModeState`),
+  Doppelklick → `ResizeModeState`; movingIds = Auswahl bzw. Ziel ∪
+  `findTextIdsOwnedBy` — externe Label wandern mit ihrem Owner mit, auch
+  ohne eigene Selektion),
   `CircleToolState` / `RectangleToolState` / `ConnectToolState`,
+  `TextToolState` (EINE Press-Regel, Verzweigungen in der Aktion: Klick auf
+  K/R → `EditTextOfObject`; Ctrl+Klick auf K/R → `CreateTextFor(owner)`;
+  Klick auf Text → `EditText`; Verbindungsnähe → bestehendes Label
+  bearbeiten [Kardinalität 0..1] sonst `CreateConnectionText` mit
+  projiziertem Anker; Leere → `CreateTextFor(null)`; ESC → Idle),
   `PendingCreateOrPanState` (Klick-oder-Drag-Entscheidung), `MovingState`,
   `PendingMoveState`, `PendingBoxSelectState` (Gummiband: Ctrl+Leerraum-Drag,
   stumm bis zum Release, EIN `SetSelection`), `ConnectingState` (Waypoints sammeln, ESC bricht ab),
@@ -233,7 +299,11 @@ Fakt + Zustand raus), inklusive Ablehnung ungültiger Verbindungen.
 `GridSpecTest`, `HandlePositionsTest`, `SelectionServiceTest` und
 `ResizeModeStateTest` decken Grid-Mathematik, Griff-Geometrie, Auswahl und
 die komplette Resize-Geste ab (kein Request während des Drags, genau ein
-Commit beim Loslassen).
+Commit beim Loslassen). `TextModelTest` (Service-Ebene: Hit/Band für
+Text-Boxen, Move-Skip verankert, Mitwandern externer Label, Lösch-Kaskade
+inkl. Undo, innere Texte mit Undo/Redo, Anker-Ableitung/-Klemmung,
+Verbindungs-Geometrie) und `TextToolTest` (Gesten-Intents, 0..1-Kardinalität,
+KEY-T/ESC) decken das Text-Feature ab — **92 Tests gesamt, alle grün**.
 **Jedes neue Interaktions-Feature bekommt einen solchen Event-basierten Test.**
 
 ---
@@ -295,12 +365,28 @@ Beim Umsetzen dieser Features die obigen Goldenen Regeln einhalten:
   `GridSpec.snapToGrid(...)` existiert, muss in den Move-Pfad integriert
   werden. Demo2-Semantik: Zielposition des primär gezogenen Objekts snappen,
   Gruppe folgt dem resultierenden Delta — zentral in `GridSpec`, nicht wie
-  in demo2 inline dupliziert.
-* **Text-Feature:** siehe Produktvision — `Text implements DiagramObject`
-  mit `parentObjectId`, neue ActionEvents (`AddText`/`UpdateText`/
-  `DeleteText`), Serialisierungserweiterung. UX gemäß „Entschiedene Fragen"
-  Nr. 4 (Platzhalter + Inline-Editor, ENTER/ESC). EINE Auswahl-Menge statt
-  demo2s zwei parallelen Sets.
+  in demo2 inline dupliziert. Für Texte gilt die Mittelpunkt-Konvention
+  (Text.x/y snapt), hängt aber an diesem selben Block.
+* **Text-Feature:** ✅ Core implementiert (28.10.) — Modell (`Text` mit
+  Mittelpunkt-Konvention, `TextAnchor`, `Circle.label`,
+  `Rectangle.content/centered`), Service-Schreibpfad inkl. Anker-Ableitung,
+  Lösch-Kaskade für Owned-Texte, Undo/Redo (`ObjectTextChanged` +
+  mechanische Inversion), `TextToolState` mit UI-Intents,
+  `ToolState`-Zentralisierung als Vorbereitung. Offen:
+  * **UI-Editor:** Die Intents (`EditTextOfObject`, `EditText`,
+    `CreateTextFor`, `CreateConnectionText`) haben noch keinen Konsumenten —
+    Inline-Editor mit ENTER-Commit/ESC-Verwerfen ist UI-Meilenstein
+    („Entschiedene Fragen" Nr. 4). Die Default-Position externer Labels
+    („unterhalb des Objekts") berechnet die UI aus ihrer faktensynchronisierten
+    Sicht.
+  * **W-Gleiten:** Verankerte Texte leiten x/y bei Erzeugung/Re-Ankerung ab;
+    das „Gleiten mit Waypoint-Verschiebungen" (spec.md) folgt mit der
+    W-Sichtbarkeit — heute sind W-Moves unmöglich, x/y kann nicht stale
+    werden. Bei der Implementierung in `onMoveObjects` als Teil desselben
+    `ObjectsMoved`-Batch-Fakts ableiten (keine versteckte Kaskade).
+  * **Serialisierung:** `Text`/`label`/`content` ins DTO (Persistence-Block
+    unten), EINE Auswahl-Menge statt demo2s zwei parallelen Sets ist bereits
+    durch das UUID-basierte SelectionService-Design gewährleistet.
 * **Persistenz/Serialisierung:** JSON-Format = demo2s Gson-Export (Beispiel:
   `doc/spec.md`), plus `texts`; DTO an der Serialisierungsgrenze konvertiert
   (`Circle.radius` ↔ width/height), Connections per `waypointIds`.

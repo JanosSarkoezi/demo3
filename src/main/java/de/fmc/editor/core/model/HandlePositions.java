@@ -6,8 +6,8 @@ import java.util.Map;
 
 /**
  * Reine Griff-Geometrie für Resize-Interaktionen (Welt-Koordinaten).
- * Rechteck: 8 Griffe (4 Ecken + 4 Seiten-Mitten). Kreis: 4 Griffe
- * (N/O/S/W auf dem Umfang). Waypoint: keine.
+ * Rechteck und Text-Box: 8 Griffe (4 Ecken + 4 Seiten-Mitten). Kreis: 4
+ * Griffe (N/O/S/W auf dem Umfang). Waypoint: keine.
  *
  * Zustandslos und deterministisch — von States (Hit-Test) und der
  * späteren UI (Rendering) gleichermaßen nutzbar.
@@ -22,17 +22,18 @@ public final class HandlePositions {
 
     public static Map<HandleType, HandlePoint> of(DiagramObject object) {
         return switch (object) {
-            case Rectangle rectangle -> ofRectangle(rectangle);
+            case Rectangle rectangle -> ofBox(rectangle.x(), rectangle.y(),
+                    rectangle.width(), rectangle.height());
+            case Text text -> ofBox(text.x(), text.y(), text.width(), text.height());
             case Circle circle -> ofCircle(circle);
             case Waypoint waypoint -> Map.of();
         };
     }
 
-    private static Map<HandleType, HandlePoint> ofRectangle(Rectangle rectangle) {
-        double cx = rectangle.x();
-        double cy = rectangle.y();
-        double halfWidth = rectangle.width() / 2;
-        double halfHeight = rectangle.height() / 2;
+    private static Map<HandleType, HandlePoint> ofBox(double cx, double cy,
+                                                      double width, double height) {
+        double halfWidth = width / 2;
+        double halfHeight = height / 2;
 
         Map<HandleType, HandlePoint> handles = new EnumMap<>(HandleType.class);
         handles.put(HandleType.NW, new HandlePoint(cx - halfWidth, cy - halfHeight));

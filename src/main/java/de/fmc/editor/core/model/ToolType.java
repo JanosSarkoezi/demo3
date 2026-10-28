@@ -5,5 +5,6 @@ public enum ToolType {
     CIRCLE,
     RECTANGLE,
     CONNECT,
+    TEXT,
     NONE
 }

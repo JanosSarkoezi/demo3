@@ -2,7 +2,7 @@ package de.fmc.editor.core.model;
 
 import java.util.UUID;
 
-public sealed interface DiagramObject permits Circle, Rectangle, Waypoint {
+public sealed interface DiagramObject permits Circle, Rectangle, Waypoint, Text {
     UUID id();
     double x();
     double y();
