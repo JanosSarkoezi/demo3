@@ -15,12 +15,33 @@ Was habe ich so geplant fuer den FMC-Editor:
   - Einfacher Klick auf die leere Flaeche: hebt die Auswahl auf. Ebenso ESC.
   - CTRL+Klick+Drag auf der leeren Flaeche spannt ein Auswahlrechteck (Gummiband) auf. Beim Loslassen werden alle Objekte im Rechteck ausgewaehlt; das Band ersetzt die bisherige Auswahl. Ein CTRL+Klick ohne Drag aendert nichts, ESC bricht das Band ab.
 - Loeschen: Die DEL-Taste loescht alle aktuell selektierten Objekte.
-- Groessenanpassung der Ks und Rs
-- Angaben von Text in den Ks und Rs durch Auswahl eines Tools an der Seite.
-  - Die Ks werden nur ein Buchstaben enthalten.
-  - Die Rs koennen mehrzeiligen Text enthalten. Sie sollen Zentriert werden koennen.
-  - Zu einem K koennen auserhalb ein oder mehrere Texte zugeordnet sein.
-  - Zu einem R koennen auserhalb kein oder mehrere Texte zugeordnet sein.
+- Groessenanpassung der Ks und Rs. Auch Text-Boxen (siehe unten) sind auf diese Weise in der Groesse veraenderbar.
+- Angaben von Text durch Auswahl eines Text-Werkzeugs an der Seite:
+  - Innerer Text im K: Ein K enthaelt 0 oder 1 Text, und dieser besteht aus genau einem Buchstaben. Die Eingabemaske begrenzt auf ein Zeichen.
+  - Innerer Text im R: Ein R enthaelt 0 oder 1 mehrzeiligen Text. Der Text kann zentriert werden (Schalter je R).
+    - Der innere Text nutzt die Box des R abzueglich eines kleinen Innenrands. Wird das R in der Groesse geaendert, passt sich die Text-Box automatisch mit an (kein eigenes Resize noetig).
+  - Externe Texte an K und R: 0 bis beliebig viele Texte koennen ausserhalb zu einem K oder R gehoeren.
+    - Jeder externe Text hat eine eigene rechteckige Box und ist in der Groesse veraenderbar (Resize).
+    - Wird das zugehoerige K oder R verschoben, wandern alle seine externen Texte mit.
+    - Wird das zugehoerige K oder R geloescht, werden seine externen Texte mitgeloelscht.
+  - Text an Verbindungen: Jede Verbindung kann 0 oder 1 Text haben.
+    - Der Text ist an einem Verbindungsabschnitt verankert (Anker): Ein Klick auf die Verbindung legt den Text am geklickten Abschnitt fest (z. B. zwischen W1 und W2), inklusive Abstand zur Linie.
+    - Verschiebt der Benutzer den Text, wird der Anker neu gesetzt (naechstliegender Abschnitt plus Position entlang der Linie). Das Platzieren bleibt damit beim Benutzer.
+    - Veraendert sich die Verbindung (z. B. ein W wird verschoben oder ein Endpunkt wandert), gleitet der Text mit seinem Abschnitt mit — die Platzierungs-Absicht bleibt erhalten.
+    - Wird ein W geloescht, rutscht der Anker auf den dann letzten Abschnitt; Position entlang der Linie und Abstand bleiben.
+    - Der Text liegt in einer eigenen rechteckigen Box und ist in der Groesse veraenderbar.
+    - Beim Verschieben gilt auch hier das Snapping: Der Anker wird so gesetzt, dass der Mittelpunkt der Box auf einem Gitterpunkt liegt. Veraendert sich die Verbindung spaeter, folgt der Text seinem Abschnitt (siehe oben).
+    - Wird die Verbindung geloescht, verschwindet ihr Text mit.
+  - Freier Text: Ein Klick auf die leere Flaeche erzeugt einen freien Text ohne Zuordnung (z. B. fuer Anmerkungen).
+  - Snapping von Texten: Beim VERSCHIEBEN eines Textes landet der Mittelpunkt seiner Bounding-Box auf einem Gitterpunkt des virtuellen Netzes. Bei der Erstellung bleibt der Text frei an der Klickstelle bzw. an seiner Default-Position. So lassen sich Texte neben oder ueber einem R so anordnen, dass der Text-Mittelpunkt und der R-Mittelpunkt auf einer Linie liegen.
+- Bedienung des Text-Werkzeugs:
+  - Klick auf ein K oder R: legt den inneren Text an bzw. oeffnet ihn zum Bearbeiten.
+  - CTRL+Klick auf ein K oder R: legt ein externes Text-Feld unterhalb des Objekts an und oeffnet es zum Bearbeiten.
+  - Klick auf einen bestehenden Text: oeffnet diesen Text zum Bearbeiten.
+  - Klick in die Naehe einer Verbindung: legt das Verbindungs-Label am geklickten Abschnitt an. Hat die Verbindung bereits einen Text, wird dieser stattdessen geoeffnet (maximal einer pro Verbindung).
+  - Doppelklick (im Auswahl-Werkzeug) oeffnet die Resize-Griffe — einheitlich bei K, R und Texten.
+- Textbearbeitung: Der Text wird in einem Inline-Editor direkt am Platz bearbeitet. ENTER schliesst die Eingabe ab (nur bei Aenderung wirkt sie sich aus), ESC verwirft sie, ein Klick daneben schliesst ebenfalls ab.
+- Speicherformat: Das JSON-Format erhaelt zusaetzlich einen "texts"-Abschnitt (freie, externe und Verbindungs-Texte mit Box und Zuordnung) sowie ein "label"-Feld beim K und "content"/"centered" beim R.
 - Das geammte gezeichnete Objekt kann im volgenden Format gespeichert werden:
 ```json
 {
