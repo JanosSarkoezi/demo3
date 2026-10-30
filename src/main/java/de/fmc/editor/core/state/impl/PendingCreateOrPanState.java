@@ -16,25 +16,28 @@ public final class PendingCreateOrPanState extends BaseState {
     private final double startScreenX;
     private final double startScreenY;
     private final ToolType activeTool;
+    private final CustomMouseButton button;
 
-    public PendingCreateOrPanState(double startScreenX, double startScreenY, ToolType activeTool) {
+    /** button: die Taste, mit der die Geste startete — nur deren Loslassen
+     *  beendet das angeforderte Panning (kein hardcodierter PRIMARY-Glaube). */
+    public PendingCreateOrPanState(double startScreenX, double startScreenY, ToolType activeTool,
+                                   CustomMouseButton button) {
         this.startScreenX = startScreenX;
         this.startScreenY = startScreenY;
         this.activeTool = activeTool;
+        this.button = button;
 
         // 1. Dragging über Schwellenwert -> Panning anfordern, Kamera übernimmt
         addRule(InputEvent.MouseDragged.class,
                 (e, c) -> distance(startScreenX, startScreenY, e.x(), e.y()) > DRAG_THRESHOLD_PIXELS,
                 (e, c) -> {
-                    // PRIMARY: Diese Geste startete mit einem Linksklick —
-                    // nur dessen Loslassen beendet das Panning.
-                    c.publisher().publish(new ActionEvent.RequestCameraPan(startScreenX, startScreenY, CustomMouseButton.PRIMARY));
+                    c.publisher().publish(new ActionEvent.RequestCameraPan(startScreenX, startScreenY, button));
                     return returnToToolState(); // Tool pausiert und geht zurück in Grundzustand
                 });
 
         // 2. Loslassen ohne Drag -> Element an Welt-Koordinaten erzeugen
         addRule(InputEvent.MouseReleased.class,
-                e -> e.button() == CustomMouseButton.PRIMARY,
+                e -> e.button() == button,
                 (e, c) -> {
                     // Bildschirm-Pixel in Welt-Koordinaten umrechnen
                     double worldX = c.camera().screenToWorldX(startScreenX);

@@ -29,7 +29,7 @@ public abstract class ToolState extends BaseState {
             case RECTANGLE -> self == ToolType.RECTANGLE ? this : new RectangleToolState();
             case CONNECT -> self == ToolType.CONNECT ? this : new ConnectToolState();
             case TEXT -> self == ToolType.TEXT ? this : new TextToolState();
-            case SELECT, NONE -> self == ToolType.SELECT ? this : new IdleToolState();
+            case SELECT -> self == ToolType.SELECT ? this : new IdleToolState();
         });
 
         // Shortcuts für Werkzeug-Wechsel — eine Guard-disjunkte Regel pro Key

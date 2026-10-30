@@ -50,7 +50,7 @@ public final class IdleToolState extends ToolState {
                         }
                         // Klick ins Leere -> Auswahl aufheben; kann Drag/Pan werden
                         c.publisher().publish(new ActionEvent.SetSelection(List.of()));
-                        return new PendingCreateOrPanState(e.x(), e.y(), ToolType.SELECT);
+                        return new PendingCreateOrPanState(e.x(), e.y(), ToolType.SELECT, e.button());
                     }
 
                     // Selektion bei Maus-Druck: einfacher Klick = exklusiv,

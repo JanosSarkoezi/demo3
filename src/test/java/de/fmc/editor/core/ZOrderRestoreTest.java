@@ -2,17 +2,11 @@ package de.fmc.editor.core;
 
 import de.fmc.editor.core.bus.InteractionEventBus;
 import de.fmc.editor.core.event.ActionEvent;
-import de.fmc.editor.core.event.CustomMouseButton;
 import de.fmc.editor.core.event.DiagramEvent;
-import de.fmc.editor.core.event.InputEvent;
 import de.fmc.editor.core.model.Circle;
-import de.fmc.editor.core.model.GridSpec;
 import de.fmc.editor.core.model.Rectangle;
 import de.fmc.editor.core.model.Waypoint;
 import de.fmc.editor.core.service.DiagramService;
-import de.fmc.editor.core.service.SelectionService;
-import de.fmc.editor.core.service.UndoService;
-import de.fmc.editor.core.state.CameraInfo;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -32,47 +26,30 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 class ZOrderRestoreTest {
 
+    private BusTestSupport support;
     private InteractionEventBus bus;
     private DiagramService diagram;
     private final List<DiagramEvent.ConnectionEstablished> established = new ArrayList<>();
-    private UUID defaultLayerId;
 
     @BeforeEach
     void setUp() {
-        established.clear();
-        defaultLayerId = UUID.randomUUID();
-
-        diagram = new DiagramService();
-        SelectionService selectionService = new SelectionService();
-        UndoService undoService = new UndoService();
-        bus = new InteractionEventBus(diagram,
-                new CameraInfo(1.0, 0.0, 0.0, defaultLayerId),
-                new GridSpec(10.0), selectionService);
-        diagram.attachTo(bus);
-        selectionService.attachTo(bus);
-        undoService.attachTo(bus);
-
+        support = new BusTestSupport();
+        bus = support.bus;
+        diagram = support.diagram;
         bus.subscribe(DiagramEvent.ConnectionEstablished.class, established::add);
     }
 
+    /** Hier ist JEDES Erstellen eine eigene Geste (eigener Undo-Punkt). */
     private Circle addCircle(double x, double y) {
-        Circle circle = new Circle(UUID.randomUUID(), x, y, 20.0, defaultLayerId);
-        bus.publish(new ActionEvent.AddElement(circle));
-        closeGesture();
+        Circle circle = support.addCircle(x, y);
+        support.closeGesture();
         return circle;
     }
 
     private Rectangle addRectangle(double x, double y) {
-        Rectangle rect = new Rectangle(UUID.randomUUID(), x, y, 40.0, 30.0, defaultLayerId);
-        bus.publish(new ActionEvent.AddElement(rect));
-        closeGesture();
+        Rectangle rect = support.addRectangle(x, y);
+        support.closeGesture();
         return rect;
-    }
-
-    /** Neutrale Gesten-Grenze: IdleToolState ignoriert das Release, der
-     *  UndoService schließt den laufenden Eintrag. */
-    private void closeGesture() {
-        bus.publish(new InputEvent.MouseReleased(0.0, 0.0, CustomMouseButton.PRIMARY));
     }
 
     @Test
@@ -104,9 +81,9 @@ class ZOrderRestoreTest {
     void cascadeRestorePreservesZOrder() {
         Circle circle = addCircle(100.0, 100.0);
         Rectangle rect = addRectangle(300.0, 100.0);
-        Waypoint waypoint = new Waypoint(UUID.randomUUID(), 200.0, 150.0, defaultLayerId);
+        Waypoint waypoint = new Waypoint(UUID.randomUUID(), 200.0, 150.0, support.defaultLayerId);
         bus.publish(new ActionEvent.CreateConnection(circle.id(), rect.id(), List.of(waypoint)));
-        closeGesture();
+        support.closeGesture();
         // Waypoints werden beim Verbindungsaufbau oben angelegt:
         assertThat(diagram.zOrderIds())
                 .containsExactly(circle.id(), rect.id(), waypoint.id());

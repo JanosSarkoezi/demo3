@@ -572,3 +572,53 @@ Chronik der Arbeitssessions. Format: Datum / Was / Warum so / Grenzen & Verbesse
 - Move-Snapping (auch Text-Mittelpunkt) hängt am bestehenden Snapping-Block;
   W-Gleiten und Serialisierung (Text/label/content ins DTO) sind offene,
   in AGENTS.md verortete Folgeblöcke.
+
+## 30.10.2026 — KI-Review-Runde 2: Faktencheck + drei Sofortmaßnahmen
+
+**Was:**
+
+- Drei externe KI-Reviews (chatgpt/deepseek/gemini, Runde 2 mit aktuellem
+  Snapshot inkl. Tests) gegen den Code verifiziert: alle konkreten Claims
+  dieser Runde bestätigt, keine widerlegt (Runde 1 war überwiegend stale).
+  Bestätigt u. a.: DiagramService-Tendenz zur God-Class (662 Zeilen),
+  Subscriber-Exceptions brechen die Bus-Verteilung (Fail-fast, bewusst),
+  UI-Text-Intents ohne Konsument, Grid-Snapping nicht im Move-Pfad.
+- Sofortmaßnahme 1 (deepseek #3): `PendingCreateOrPanState` erhält den
+  auslösenden Maus-Button als Konstruktor-Parameter statt `PRIMARY` zu
+  hardcodieren — alle drei Konstruktionsstellen (Circle, Rectangle, Idle)
+  reichen `e.button()` durch; auch die Release-Regel vergleicht jetzt gegen
+  den gespeicherten Button.
+- Sofortmaßnahme 2 (deepseek #5): `ToolType.NONE` entfernt — ein Enum-Wert,
+  den niemand setzt, ist eine Einladung, ihn irgendwann „mal" zu setzen;
+  `ToolState`-Switch auf `case SELECT` reduziert.
+- Sofortmaßnahme 3 (deepseek #7): `BusTestSupport` als geteilter Test-Rahmen
+  (Bus + Services in Produktions-Reihenfolge verdrahtet, plus
+  `closeGesture`/`addCircle`/`addRectangle`) — ersetzt die Duplikate in
+  `UndoRedoTest` und `ZOrderRestoreTest`. Semantik-Unterschied bleibt
+  sichtbar: ZOrderRestoreTest schließt JEDS Erstellen als eigene Geste
+  (lokale Wrapper), UndoRedoTest entscheidet pro Test.
+
+**Warum so:**
+
+- Der Button-Parameter entfernt eine stille Annahme („Geste startet immer
+  mit Linksklick"): Heute noch wahr, aber bei „Space+Drag" oder
+  Rechtsklick-Pan wäre der Hardcode falsch geworden — 3-Zeilen-Änderung
+  jetzt statt Debugging später.
+- Nur bestätigte Findings umsetzen; widerlegte aus Runde 1 (Kamera-Snapshot,
+  fehlende Selektion, ToolState-Duplikation) waren bereits erledigt —
+  Beleg, dass der Faktencheck vor der Umsetzung kommen muss.
+- `BusTestSupport` hält künftige Tests klein; die bewusste Entscheidung,
+  OB ein AddElement ein eigener Undo-Punkt ist, bleibt beim Aufrufer
+  (kein verstecktes Verhalten im Helfer).
+
+**Grenzen & Verbesserungskandidaten:**
+
+- Nicht umgesetzt (Design-Entscheidungen aussteigend): DiagramService-Split
+  (am Persistenz-Meilenstein festmachen), Subscriber-Exception-Politik
+  dokumentieren + Test, ConnectionRule-Signatur vor der zweiten Regel,
+  Undo-nach-Load-Semantik (deepseeks Frage nach `suspendRecording()`).
+- Offen aus Review + Nutzerwunsch: Waypoints als volle Selektions- und
+  Gummiband-Ziele (Move-Maschinerie unterstützt es bereits; blockiert nur
+  durch die Typ-Filter in `findTopmostAt`/`findObjectsInBounds`) — nächster
+  Arbeitsblock.
+- `mvn test`: 92/92 grün.

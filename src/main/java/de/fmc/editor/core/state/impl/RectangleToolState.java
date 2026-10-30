@@ -13,7 +13,7 @@ public final class RectangleToolState extends ToolState {
         // 1. Linksklick -> In die Gesten-Prüfung für Rechtecke
         addRule(InputEvent.MousePressed.class,
                 e -> e.button() == CustomMouseButton.PRIMARY,
-                (e, c) -> new PendingCreateOrPanState(e.x(), e.y(), ToolType.RECTANGLE));
+                (e, c) -> new PendingCreateOrPanState(e.x(), e.y(), ToolType.RECTANGLE, e.button()));
 
         // 2. ESC-Taste -> Abbrechen und zurück zu Select
         addRule(InputEvent.KeyPressed.class,

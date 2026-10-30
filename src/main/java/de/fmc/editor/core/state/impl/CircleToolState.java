@@ -13,7 +13,7 @@ public final class CircleToolState extends ToolState {
         // 1. Linksklick -> In die Gesten-Prüfung (Klick = Erzeugen, Drag = Panning)
         addRule(InputEvent.MousePressed.class,
                 e -> e.button() == CustomMouseButton.PRIMARY,
-                (e, c) -> new PendingCreateOrPanState(e.x(), e.y(), ToolType.CIRCLE));
+                (e, c) -> new PendingCreateOrPanState(e.x(), e.y(), ToolType.CIRCLE, e.button()));
 
         // 2. ESC-Taste -> Werkzeug verlassen und zurück zum Auswahl-Werkzeug
         addRule(InputEvent.KeyPressed.class,

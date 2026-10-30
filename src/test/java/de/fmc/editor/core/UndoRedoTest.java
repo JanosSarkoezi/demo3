@@ -7,13 +7,9 @@ import de.fmc.editor.core.event.DiagramEvent;
 import de.fmc.editor.core.event.InputEvent;
 import de.fmc.editor.core.model.Circle;
 import de.fmc.editor.core.model.Connection;
-import de.fmc.editor.core.model.GridSpec;
 import de.fmc.editor.core.model.Rectangle;
 import de.fmc.editor.core.model.Waypoint;
 import de.fmc.editor.core.service.DiagramService;
-import de.fmc.editor.core.service.SelectionService;
-import de.fmc.editor.core.service.UndoService;
-import de.fmc.editor.core.state.CameraInfo;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -31,39 +27,23 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 class UndoRedoTest {
 
+    private BusTestSupport support;
     private InteractionEventBus bus;
     private DiagramService diagram;
     private final List<DiagramEvent.ConnectionEstablished> established = new ArrayList<>();
-    private UUID defaultLayerId;
 
     @BeforeEach
     void setUp() {
-        established.clear();
-        defaultLayerId = UUID.randomUUID();
-
-        diagram = new DiagramService();
-        SelectionService selectionService = new SelectionService();
-        UndoService undoService = new UndoService();
-        bus = new InteractionEventBus(diagram,
-                new CameraInfo(1.0, 0.0, 0.0, defaultLayerId),
-                new GridSpec(10.0), selectionService);
-        diagram.attachTo(bus);
-        selectionService.attachTo(bus);
-        undoService.attachTo(bus);
-
+        support = new BusTestSupport();
+        bus = support.bus;
+        diagram = support.diagram;
         bus.subscribe(DiagramEvent.ConnectionEstablished.class, established::add);
-    }
-
-    private Circle addCircle(double x, double y) {
-        Circle circle = new Circle(UUID.randomUUID(), x, y, 20.0, defaultLayerId);
-        bus.publish(new ActionEvent.AddElement(circle));
-        return circle;
     }
 
     @Test
     @DisplayName("Minibeispiel: Erstellen → CTRL+Z (weg) → SHIFT+CTRL+Z (wieder da, gleiche ID)")
     void createUndoRedoCycle() {
-        Circle circle = addCircle(100.0, 100.0);
+        Circle circle = support.addCircle(100.0, 100.0);
 
         bus.publish(new ActionEvent.RequestUndo());
         assertThat(diagram.findById(circle.id())).isEmpty();
@@ -77,7 +57,7 @@ class UndoRedoTest {
     @Test
     @DisplayName("Move-Geste: mehrere Drag-Segmente sind EIN Undo-Punkt zurück zum Start")
     void moveGestureIsOneUndoStep() {
-        Circle circle = addCircle(100.0, 100.0);
+        Circle circle = support.addCircle(100.0, 100.0);
 
         // Geste simulieren: Press, Drag (Übergang), Drag (MoveObject), Release
         bus.publish(new InputEvent.MousePressed(100.0, 100.0, CustomMouseButton.PRIMARY, 1));
@@ -96,17 +76,11 @@ class UndoRedoTest {
         assertThat(diagram.findById(circle.id()).orElseThrow().x()).isEqualTo(150.0);
     }
 
-    /** Neutrale Gesten-Grenze für synthetische Abläufe: IdleToolState ignoriert
-     *  ein Release ohne vorangegangenen Press, der UndoService schließt den Eintrag. */
-    private void closeGesture() {
-        bus.publish(new InputEvent.MouseReleased(0.0, 0.0, CustomMouseButton.PRIMARY));
-    }
-
     @Test
     @DisplayName("Zwei separate Move-Gesten sind zwei Undo-Punkte")
     void twoGesturesAreTwoUndoSteps() {
-        Circle circle = addCircle(100.0, 100.0);
-        closeGesture();
+        Circle circle = support.addCircle(100.0, 100.0);
+        support.closeGesture();
 
         // Geste 1: 100 -> 130 (erster Drag = Übergang, zweiter Drag = MoveObject)
         bus.publish(new InputEvent.MousePressed(100.0, 100.0, CustomMouseButton.PRIMARY, 1));
@@ -131,14 +105,14 @@ class UndoRedoTest {
     @Test
     @DisplayName("Lösch-Kaskade: Undo stellt Objekt, Waypoints UND Connection mit Original-IDs her")
     void undoRestoresDeleteCascade() {
-        Circle circle = addCircle(100.0, 100.0);
-        closeGesture();
-        Rectangle rect = new Rectangle(UUID.randomUUID(), 300.0, 100.0, 40.0, 30.0, defaultLayerId);
+        Circle circle = support.addCircle(100.0, 100.0);
+        support.closeGesture();
+        Rectangle rect = new Rectangle(UUID.randomUUID(), 300.0, 100.0, 40.0, 30.0, support.defaultLayerId);
         bus.publish(new ActionEvent.AddElement(rect));
-        closeGesture();
-        Waypoint waypoint = new Waypoint(UUID.randomUUID(), 200.0, 150.0, defaultLayerId);
+        support.closeGesture();
+        Waypoint waypoint = new Waypoint(UUID.randomUUID(), 200.0, 150.0, support.defaultLayerId);
         bus.publish(new ActionEvent.CreateConnection(circle.id(), rect.id(), List.of(waypoint)));
-        closeGesture();
+        support.closeGesture();
         Connection connection = established.getFirst().connection();
 
         // Löschen kaskadiert alles weg
@@ -165,13 +139,13 @@ class UndoRedoTest {
     @Test
     @DisplayName("Verbindungserstellung: Undo entfernt Connection UND ihre Waypoints")
     void undoRemovesConnectionAndWaypoints() {
-        Circle circle = addCircle(100.0, 100.0);
-        closeGesture();
-        Rectangle rect = new Rectangle(UUID.randomUUID(), 300.0, 100.0, 40.0, 30.0, defaultLayerId);
+        Circle circle = support.addCircle(100.0, 100.0);
+        support.closeGesture();
+        Rectangle rect = new Rectangle(UUID.randomUUID(), 300.0, 100.0, 40.0, 30.0, support.defaultLayerId);
         bus.publish(new ActionEvent.AddElement(rect));
-        closeGesture();
-        Waypoint w1 = new Waypoint(UUID.randomUUID(), 150.0, 150.0, defaultLayerId);
-        Waypoint w2 = new Waypoint(UUID.randomUUID(), 250.0, 150.0, defaultLayerId);
+        support.closeGesture();
+        Waypoint w1 = new Waypoint(UUID.randomUUID(), 150.0, 150.0, support.defaultLayerId);
+        Waypoint w2 = new Waypoint(UUID.randomUUID(), 250.0, 150.0, support.defaultLayerId);
         bus.publish(new ActionEvent.CreateConnection(circle.id(), rect.id(), List.of(w1, w2)));
         Connection connection = established.getFirst().connection();
 
@@ -193,9 +167,9 @@ class UndoRedoTest {
     @Test
     @DisplayName("Resize: Undo stellt die alten Maße exakt wieder her")
     void undoRestoresOldSize() {
-        Rectangle rect = new Rectangle(UUID.randomUUID(), 100.0, 100.0, 40.0, 30.0, defaultLayerId);
+        Rectangle rect = new Rectangle(UUID.randomUUID(), 100.0, 100.0, 40.0, 30.0, support.defaultLayerId);
         bus.publish(new ActionEvent.AddElement(rect));
-        closeGesture(); // Erstellen ist ein eigener Undo-Punkt, Resize ein weiterer
+        support.closeGesture(); // Erstellen ist ein eigener Undo-Punkt, Resize ein weiterer
 
         bus.publish(new ActionEvent.ResizeObject(rect.id(), 80.0, 50.0));
         bus.publish(new ActionEvent.RequestUndo());
@@ -212,12 +186,12 @@ class UndoRedoTest {
     @Test
     @DisplayName("Neue Aktion nach Undo leert den Redo-Stack")
     void newActionInvalidatesRedoStack() {
-        Circle a = addCircle(100.0, 100.0);
+        Circle a = support.addCircle(100.0, 100.0);
         bus.publish(new ActionEvent.RequestUndo());
         assertThat(diagram.findById(a.id())).isEmpty();
 
         // Neue Aktion (Kollege ruft, neuer Klick) — Redo-Altbestand ist futsch:
-        Circle b = addCircle(300.0, 100.0);
+        Circle b = support.addCircle(300.0, 100.0);
         bus.publish(new ActionEvent.RequestRedo());
 
         // A bleibt weg, B bleibt da:
@@ -228,7 +202,7 @@ class UndoRedoTest {
     @Test
     @DisplayName("Undo mit leerer History ist ein stiller No-Op")
     void undoWithEmptyHistoryIsSilentNoOp() {
-        Circle circle = addCircle(100.0, 100.0);
+        Circle circle = support.addCircle(100.0, 100.0);
 
         bus.publish(new ActionEvent.RequestUndo());
         bus.publish(new ActionEvent.RequestUndo()); // zweite Ebene gibt es nicht

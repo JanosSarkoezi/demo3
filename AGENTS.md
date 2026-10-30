@@ -60,7 +60,7 @@ Die `spec.md` im `doc/`-Verzeichnis beschreibt die Zielversion des Editors. Kern
 ### 1. Datenmodell (Core, immutable)
 * **Sealed Interface `DiagramObject`** mit den Records `Circle`, `Rectangle`,
   `Waypoint` und `Text`. Alle sind immutable, threadsicher und frei von JavaFX-Imports.
-  `ToolType` (SELECT, CIRCLE, RECTANGLE, CONNECT, TEXT, NONE) steuert die Werkzeuge.
+  `ToolType` (SELECT, CIRCLE, RECTANGLE, CONNECT, TEXT) steuert die Werkzeuge.
   * **`Circle`** trägt `label` (innerer Text, per Konvention 1 Buchstabe —
     Modell permissiv, UI erzwingt), **`Rectangle`** trägt `content` +
     `centered` (Default true; die innere Text-Box ist von der R-Geometrie
