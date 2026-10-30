@@ -26,8 +26,12 @@ public final class CameraIdleState implements CameraState {
             return new CameraPanningState(mp.x(), mp.y(), CustomMouseButton.MIDDLE);
         }
 
-        // 3. Zoom via Mausrad
-        if (event instanceof InputEvent.MouseScrolled ms) {
+        // 3. Zoom via Mausrad. delta==0 wird still ignoriert (demo2-Wächter,
+        //    Zeile 68 des Vorgängers): VNC- und hochauflösende Treiber liefern
+        //    pro Raste oft ein Null-Delta-Begleit-Event — ohne den Wächter
+        //    würde jeder Null-Delta wie «nach unten» wirken und der Zoom
+        //    rein/raus-zappeln. Die Klemmung (0.2–10) macht CameraInfo.zoomAt.
+        if (event instanceof InputEvent.MouseScrolled ms && ms.deltaY() != 0) {
             double factor = ms.deltaY() > 0 ? 1.1 : 0.9;
             context.publisher().publish(new ActionEvent.ZoomView(factor, ms.x(), ms.y()));
         }

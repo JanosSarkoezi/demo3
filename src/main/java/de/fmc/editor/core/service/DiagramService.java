@@ -476,6 +476,23 @@ public class DiagramService implements DiagramQuery {
         return result;
     }
 
+    @Override
+    public List<DiagramObject> allObjectsInZOrder() {
+        List<DiagramObject> result = new ArrayList<>(zOrder.size());
+        for (UUID id : zOrder) {
+            DiagramObject obj = objects.get(id);
+            if (obj != null) {
+                result.add(obj);
+            }
+        }
+        return result;
+    }
+
+    @Override
+    public List<Connection> allConnections() {
+        return List.copyOf(connections.values());
+    }
+
     /**
      * Effektive Move-Menge zu einer Auswahl-Basis: die Basis selbst, ihre
      * externen Label (wandern mit ihrem Owner) und die Waypoints

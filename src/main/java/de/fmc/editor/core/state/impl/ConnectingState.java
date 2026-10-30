@@ -51,8 +51,12 @@ public final class ConnectingState extends BaseState {
                             c.publisher().publish(new ActionEvent.CreateConnection(
                                     sourceObject.id(),
                                     target.id(),
-                                    List.copyOf(this.waypoints) // Inmutable Kopie der Waypoints
+                                    List.copyOf(this.waypoints) // Inutable Kopie der Waypoints
                             ));
+                            // Vorschau aufräumen — NACH CreateConnection, damit
+                            // die ConnectionEstablished-Fakten zuerst ankommen.
+                            c.publisher().publish(new ActionEvent.ConnectionPreviewChanged(
+                                    null, List.of()));
                             return new ConnectToolState(); // Fertig, bereit für nächste Verbindung
                         }
 
@@ -67,6 +71,8 @@ public final class ConnectingState extends BaseState {
                                 c.camera().defaultLayerId()
                         );
                         this.waypoints.add(newWaypoint);
+                        c.publisher().publish(new ActionEvent.ConnectionPreviewChanged(
+                                sourceObject.id(), List.copyOf(this.waypoints)));
 
                         // Im ConnectingState bleiben für weitere Waypoints oder den Ziel-Klick
                         return this;
@@ -74,10 +80,30 @@ public final class ConnectingState extends BaseState {
                 }
         );
 
+        // Werkzeug-Wechsel (Toolbar-Klick) während der Geste: Vorschau
+        // aufräumen und in das angeforderte Werkzeug wechseln. Ohne diese
+        // Regel bliebe die Geste — und ihre UI-Vorschau — hängen.
+        // SelectTool(CONNECT) lässt die laufende Geste bewusst weiterlaufen.
+        addRule(ActionEvent.SelectTool.class, (e, c) -> {
+            c.publisher().publish(new ActionEvent.ConnectionPreviewChanged(
+                    null, List.of()));
+            return switch (e.tool()) {
+                case CIRCLE -> new CircleToolState();
+                case RECTANGLE -> new RectangleToolState();
+                case TEXT -> new TextToolState();
+                case SELECT -> new IdleToolState();
+                case CONNECT -> this;
+            };
+        });
+
         // ESC -> Vorgang abbrechen und Waypoints verwerfen
         addRule(InputEvent.KeyPressed.class,
                 e -> e.code() == CustomKeyCode.ESCAPE,
-                (e, c) -> new ConnectToolState()
+                (e, c) -> {
+                    c.publisher().publish(new ActionEvent.ConnectionPreviewChanged(
+                            null, List.of()));
+                    return new ConnectToolState();
+                }
         );
     }
 

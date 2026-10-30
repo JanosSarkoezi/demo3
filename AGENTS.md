@@ -4,10 +4,11 @@ Dieses Dokument beschreibt die **tatsächlich implementierte** Architektur des
 FMC-Editors (Stand: Kern-/Interaktions-Schicht, Java 21, Maven). Ziel ist eine
 strikte Trennung zwischen Interaktionslogik (Core) und späterer UI (JavaFX).
 
-> **Wichtig:** Die UI-Schicht existiert noch nicht. Das Projekt ist aktuell ein
-> reiner, UI-unabhängiger Interaktions-Motor. Nicht implementierte, aber
-> angedachte Features sind unten unter „Geplant / fehlt noch" aufgelistet —
-> dort stehende Klassennamen sind **Ziel-Vision, nicht Realität**.
+> **Wichtig:** Die UI-Schicht existiert in ihrer ersten Ausbaustufe
+> („Erstes Licht", 30.10.): `Main`, Toolbar, Event-Übersetzer und ein
+> „stummer Scene-Graph" (`GraphView`) sind da und lauffähig — Details
+> unten. Nicht implementierte Features stehen unter „Geplant / fehlt noch"
+> — dort stehende Klassennamen sind **Ziel-Vision, nicht Realität**.
 
 ---
 
@@ -222,7 +223,11 @@ Der Bus ist die zentrale Schaltstelle (`implements EventBusPublisher`):
 
 1. **Kamera-Machine zuerst:** verarbeitet `InputEvent`s und
    `RequestCameraPan` (trägt die auslösende Maustaste — nur deren Loslassen
-   beendet das Panning).
+   beendet das Panning). Der **Mausrad-Zoom lebt hier** (`CameraIdleState`,
+   Regel 3) und wirkt damit in JEDEM Werkzeug — demo3-Äquivalent zu demo2s
+   Controller-Zoom; eine Zweitregel in einem Tool-State würde ihn verdoppeln.
+   Null-Delta-Scrolls (VNC-Begleit-Events) werden still ignoriert; die
+   Klemmung 0.2–10 (`MIN_ZOOM`/`MAX_ZOOM`) macht `CameraInfo.zoomAt`.
 2. **Tool-Machine nur, wenn die Kamera nicht aktiv panned**
    (`cameraState.isActive()`); während des Pannings ist das Werkzeug
    pausiert.
@@ -259,7 +264,7 @@ ein `BaseStateTest` beweist die Invariante direkt. Konsequenzen:
   (Toolbar) und per Shortcuts K/R/C/T mit reflexivem self-Check (im eigenen
   Werkzeug bleibt der State). Guard-disjunkt: eine Regel pro Key, kein
   default-Switch (zuvor in jedem State dupliziert — größte demo2-Baustelle).
-* **Tool-States** (`core.state.impl`): `IdleToolState` (Zoom, Hit-Test,
+* **Tool-States** (`core.state.impl`): `IdleToolState` (Hit-Test,
   Selektion bei Press — einfach = exklusiv,
   Ctrl+Klick = Toggle, Leere/ESC = leeren —, DEL = Auswahl löschen,
   Doppelklick → `ResizeModeState` (nur K/R; Ws sind Routenpunkte ohne
@@ -292,11 +297,23 @@ ein `BaseStateTest` beweist die Invariante direkt. Konsequenzen:
   addiert zur absoluten Position und publiziert EINEN `ObjectsMoved`-
   Batch-Fakt pro Segment. Der erste Drag-Event einer Geste wird vom
   `PendingMoveState`-Übergang konsumiert.
-* **Resize: Commit erst beim Loslassen:** `HandleDragState` publiziert
-  während des Ziehens nichts (Live-Vorschau ist reine UI-Sache) und feuert
-  beim Loslassen genau EINEN `ResizeObject`/`ResizeCircle`-Request — Größe
-  symmetrisch ums Zentrum (der Mittelpunkt bleibt damit am Gridpunkt),
-  geklemmt auf mindestens eine Grid-Zelle.
+* **Resize: Commit erst beim Loslassen — Vorschau als Hinweis:** Während des
+  Ziehens publiziert `HandleDragState` pro Drag-Segment einen
+  `ResizePreviewChanged`-HINWEIS mit der exakten Commit-Geometrie (symmetrisch
+  ums Zentrum, geklemmt auf mindestens eine Grid-Zelle; dieselbe Methode
+  `computeGeometry` wie der Commit — Kern ist die einzige Rechen-Wahrheit,
+  die View rendert nur). Hinweise sind Sitzungszustand, KEINE Modell-Fakten,
+  kein Undo-Punkt; beim Loslassen bleibt es bei genau EINEM
+  `ResizeObject`/`ResizeCircle`, danach beendet ein Null-Hinweis die Vorschau
+  (auch beim ESC-Abbruch — dort stellt die View aus dem Modell her, da kein
+  Fakt kommt).
+* **Resize-Modus bleibt nach dem Commit (Option B, 30.10.)** — mit FRISCHEM
+  Record: Der Rückkehr-`ResizeModeState` liest das Objekt nach dem Commit per
+  `findById` neu (das geschnappte target trägt die Alt-Geometrie; ohne
+  Fresh-Read hitesteten die Griffe gegen veraltete Positionen — User-Fund
+  „Griffe nicht mehr greifbar"). Regel für unveränderliche Modelle: **Nach
+  jedem Commit, der in einen State mit Objekt-Bezug zurückkehrt, frisch
+  lesen.**
 
 ### 8. Tests ohne UI
 Die Interaktionslogik ist vollständig ohne JavaFX testbar:
@@ -312,8 +329,49 @@ Commit beim Loslassen). `TextModelTest` (Service-Ebene: Hit/Band für
 Text-Boxen, Move-Skip verankert, Mitwandern externer Label, Lösch-Kaskade
 inkl. Undo, innere Texte mit Undo/Redo, Anker-Ableitung/-Klemmung,
 Verbindungs-Geometrie) und `TextToolTest` (Gesten-Intents, 0..1-Kardinalität,
-KEY-T/ESC) decken das Text-Feature ab — **92 Tests gesamt, alle grün**.
+KEY-T/ESC) decken das Text-Feature ab. `WaypointSelectionMoveTest` sichert
+die W-Semantik (vollselektiert = Route wandert mit), `UiSessionIntentsTest`
+die State→UI-Hinweise und Initial-Queries, `BusTestSupport` ist der geteilte
+Test-Rahmen — **111 Tests gesamt, alle grün**.
 **Jedes neue Interaktions-Feature bekommt einen solchen Event-basierten Test.**
+
+### 9. UI-Schicht („Erstes Licht", 30.10.)
+* **`Main`** (`de.fmc.editor`): Bootstrap in Produktions-Reihenfolge —
+  Services + Bus konstruieren, DANACH `attachTo` (Zirkularität, identisch
+  zu `BusTestSupport`), danach View/Toolbar/Übersetzer verdrahten,
+  `requestFocus` auf die Zeichenfläche. Start: `mvn javafx:run`.
+* **`ui`-Paket (Systemrand):** `InputEventTranslator` übersetzt JavaFX-Events
+  in `InputEvent`s (immer SCREEN-Koordinaten — die Welt-Umrechnung macht der
+  Kern über `CameraInfo`). CTRL+Z → `RequestUndo`, CTRL+Y / CTRL+SHIFT+Z →
+  `RequestRedo` als DIREKTE ActionEvents: `CustomKeyCode` kennt Z/Y bewusst
+  nicht. `UiMouseState` hält die Mausposition (Sitzungszustand der UI).
+  `ToolbarController`: reiner Publisher (`SelectTool`, `RequestUndo/Redo`),
+  Sync über `ToolChanged`; KEIN Select-Button (kein aktiver Toggle =
+  SELECT, demo2-Stil); alle Controls `setFocusTraversable(false)` —
+  Shortcuts bleiben auf der Zeichenfläche.
+* **`view`-Paket (stummer Scene-Graph):** `GraphView` spiegelt Fakten in
+  JavaFX-Nodes — hält KEIN eigenes Modell, ALLE Modell-Nodes
+  `mouseTransparent` (Hit-Tests macht allein der Kern). Layer:
+  Verbindungen unten, Objekte, UI oben in einer `worldGroup`.
+  Kamera wird nur APPLIZIERT (`bus.getCameraInfo()` → Scale/Translate) —
+  nie selbst gerechnet (demo2-Anti-Pattern vermieden).
+  `RoutingStrategy` (Straight/RoundedCorner, Radius 20) und
+  `ConnectionViewMapper` (Pfeilspitze arrowSize 12/indent 0.65,
+  Boundary-Schnitt, in-place Path-Refresh) sind 1:1 aus demo2 portiert.
+  Hover: eigener MOUSE_MOVED-Filter + `findTopmostAt`-Query.
+* **State→UI-Hinweis-Intents** (in `ActionEvent`, KEINE Modell-Fakten — der
+  UndoService ignoriert sie wie Kamera/Selektion): `ToolChanged` (vom Bus
+  nach jedem Tool-Übergang), `ConnectionPreviewChanged` (sourceId=null
+  räumt die Vorschau auf), `ResizeModeChanged` (target=null = Griffe weg).
+  Muster: Versteckter Kern-Zustand quert die Grenze als Intent — die UI
+  besitzt ihn nie selbst. Prinzip: **Bus für Zustandsänderungen, Query für
+  Lesewissen — Hover ist Lesewissen.**
+* **Bekannte Block-1-Restchen:** View-z-Ordnung folgt der Fakt-Reihenfolge
+  (Restauration landet visuell oben — TODO im `GraphView`); Preview ohne
+  Rundung auf dem freien Abschnitt; Shortcuts K/R/C/T wirken nicht in den
+  langen Modi (Connecting/ResizeMode) — nur Toolbar-Klick und ESC beenden
+  sie; Wegpunkte-Sichtbarkeit ist reine UI-Sache (Checkbox), das
+  Layer-System fehlt noch.
 
 ---
 
@@ -342,11 +400,11 @@ KEY-T/ESC) decken das Text-Feature ab — **92 Tests gesamt, alle grün**.
 
 Beim Umsetzen dieser Features die obigen Goldenen Regeln einhalten:
 
-* **UI-Schicht (JavaFX):** Es existiert kein `Main`, kein `ViewMapper`, keine
-  Canvas-Renderlogik. `pom.xml` referenziert bereits `de.fmc.editor.Main` per
-  `javafx-maven-plugin` — diese Klasse muss bei der UI-Anbindung angelegt
-  werden. Die UI abonniert `ActionEvent`s und übersetzt JavaFX-Events in
-  `InputEvent`s.
+* **UI-Schicht — ✅ „Erstes Licht" implementiert (30.10.), siehe Abschnitt 9.**
+  Offen bleibt als nächster UI-Block der **Inline-Text-Editor** (Klick →
+  Editor-Overlay, ENTER/ESC/Klick-daneben-Semantik, Default-Position
+  externer Labels) — die Intents `EditTextOfObject`, `EditText`,
+  `CreateTextFor`, `CreateConnectionText` warten auf ihren Konsumenten.
 * **Weitere Validierung:** Neue Verbindungsregeln (Waypoint-Anzahl, Layer-Regeln
   u. ä.) als zusätzliche `ConnectionRule`s im `DiagramService` ergänzen —
   nie in den States.

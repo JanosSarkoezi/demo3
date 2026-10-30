@@ -29,6 +29,23 @@ public interface DiagramQuery {
     }
 
     /**
+     * ALLE Objekte in z-Ordnung (unten -> oben) — für den initialen Aufbau
+     * einer Ansicht (einmaliger Bestandsabruf beim Start; danach lebt die UI
+     * von den Fakten). Default: leer — Stubs bleiben stumm.
+     */
+    default List<DiagramObject> allObjectsInZOrder() {
+        return List.of();
+    }
+
+    /**
+     * ALLE Verbindungen — Initial-Bestandsabruf für eine Ansicht, analog
+     * {@link #allObjectsInZOrder()}. Default: leer — Stubs bleiben stumm.
+     */
+    default List<Connection> allConnections() {
+        return List.of();
+    }
+
+    /**
      * Nächstgelegene Connection, deren Verbindungskette den Punkt höchstens
      * `tolerance` Welt-Einheiten entfernt passiert (für Text-Klicks auf
      * Verbindungen). Default: leer — Stubs bleiben stumm.

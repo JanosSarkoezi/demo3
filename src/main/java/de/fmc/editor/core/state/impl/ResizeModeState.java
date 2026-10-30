@@ -42,6 +42,7 @@ public final class ResizeModeState extends BaseState {
                     }
                     // Klick daneben (auch auf den Objekt-Körper) -> abwählen
                     c.publisher().publish(new ActionEvent.SetSelection(List.of()));
+                    c.publisher().publish(new ActionEvent.ResizeModeChanged(null));
                     return new IdleToolState();
                 });
 
@@ -50,8 +51,23 @@ public final class ResizeModeState extends BaseState {
                 e -> e.code() == CustomKeyCode.ESCAPE,
                 (e, c) -> {
                     c.publisher().publish(new ActionEvent.SetSelection(List.of()));
+                    c.publisher().publish(new ActionEvent.ResizeModeChanged(null));
                     return new IdleToolState();
                 });
+
+        // 3. Werkzeug-Wechsel (Toolbar-Klick) im Resize-Modus: Modus sauber
+        // verlassen und in das angeforderte Werkzeug wechseln — ohne diese
+        // Regel bliebe der Modus (und die UI-Griffe) hängen.
+        addRule(ActionEvent.SelectTool.class, (e, c) -> {
+            c.publisher().publish(new ActionEvent.ResizeModeChanged(null));
+            return switch (e.tool()) {
+                case CIRCLE -> new CircleToolState();
+                case RECTANGLE -> new RectangleToolState();
+                case CONNECT -> new ConnectToolState();
+                case TEXT -> new TextToolState();
+                case SELECT -> new IdleToolState();
+            };
+        });
     }
 
     /** Hit-Test: Welcher Griff (falls einer) liegt in Griff-Nähe der Bildschirm-Position? */

@@ -1,9 +1,12 @@
 package de.fmc.editor.core.state.impl;
 
+import de.fmc.editor.core.event.ActionEvent;
 import de.fmc.editor.core.event.CustomKeyCode;
 import de.fmc.editor.core.event.CustomMouseButton;
 import de.fmc.editor.core.event.InputEvent;
 import de.fmc.editor.core.model.ToolType;
+
+import java.util.List;
 
 public final class ConnectToolState extends ToolState {
 
@@ -20,7 +23,11 @@ public final class ConnectToolState extends ToolState {
                     var target = c.diagram().findTopmostAt(worldX, worldY);
 
                     if (target.isPresent()) {
-                        // Objekt geklickt -> Starte Verbindungsmodus
+                        // Objekt geklickt -> Starte Verbindungsmodus. Der
+                        // Vorschau-Hinweis startet die UI-Kette (leer); das
+                        // freie Segment zur Maus zeichnet die UI selbst.
+                        c.publisher().publish(new ActionEvent.ConnectionPreviewChanged(
+                                target.get().id(), List.of()));
                         return new ConnectingState(target.get());
                     }
 

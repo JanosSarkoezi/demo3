@@ -3,6 +3,296 @@
 Chronik der Arbeitssessions — die neuesten Einträge stehen OBEN. Format: Datum / Was / Warum so / Grenzen & Verbesserungskandidaten.
 (Die aktuelle Architektur-Wahrheit steht in der AGENTS.md — hier nur Entscheidungen und ihre Begründung.)
 
+## 30.10.2026 (9. Arbeitsblock) — Resize: Option B + Fresh-Read-Fix + Live-Vorschau
+
+**Was:**
+
+- User-Fund aus dem visuellen Test (mit der neuen State-Trace als
+  Diagnose-Hilfe im Gespräch): Nach einem Resize bleibt der Modus zwar
+  (Option B, User-Entscheidung), aber die Griffe sind NICHT mehr greifbar.
+- Ursache: `HandleDragState` kehrte mit dem GESNAPPTEN target zurück —
+  unveränderliches Record mit ALT-Geometrie. Die View zeichnete die Griffe
+  aus Fakten (neue Positionen), der State hitestete gegen das alte Record —
+  Griff-Klicks verfehlten und galten als „Klick daneben" (Modus verließ
+  sich still selbst).
+- Fix: Nach dem Commit frisch per `findById` lesen (der Bus ist synchron —
+  nach dem Request hält das Modell die neue Geometrie). Neue Regel für
+  unveränderliche Modelle: Nach jedem Commit, der in einen State mit
+  Objekt-Bezug zurückkehrt, frisch lesen.
+- Live-Vorschau (User-Wunsch, Beobachtung 2): `ResizePreviewChanged`-Hinweis
+  pro Drag-Segment; `computeGeometry` extrahiert, Vorschau und Commit teilen
+  dieselbe Methode (laufen nie auseinander). View wendet Hinweis-Geometrie
+  an und lässt die GRIFFE mitwandern; Null-Hinweis beendet (Commit UND
+  Abbruch — beim Abbruch stellt die View aus dem Modell her, da kein Fakt
+  kommt). Hinweise sind kein Undo-Punkt; Commit bleibt EIN Fakt.
+- `ResizeFlowTest` (5 Tests): Griffe nach Commit erneut greifbar (Regression),
+  Vorschau = Commit-Mathematik, Grid-Klemmung in der Vorschau, ESC ohne
+  Commit räumt auf, Hinweise sind keine Undo-Punkte.
+
+**Warum so:**
+
+- Die Live-Vorschau folgt dem etablierten Hinweis-Muster (dritte Instanz
+  nach ToolChanged und ConnectionPreviewChanged): Versteckter Kern-Zustand
+  quert die Grenze als Intent, die View besitzt nie eigene Geometrie-Logik.
+  Der entscheidende Unterschied zu demo2: Dort hätte die View die
+  Vorschau selbst rechnen können (oder müssen) — hier bleibt der Kern die
+  einzige Rechen-Wahrheit, inklusive Grid-Klemmung.
+
+**Grenzen & Verbesserungskandidaten:**
+
+- Text-Objekte können weiterhin nicht in den Resize-Modus (Doppelklick-Guard
+  nur K/R) — HandlePositions kennt Text-Boxen bereits; Öffnung folgt mit
+  Block 3 (Text-Editor), wenn Text-Boxen editierbar werden.
+- `mvn test`: 119/119 grün (5 neue).
+
+## 30.10.2026 (8. Arbeitsblock) — Fix: Zoom schwenkte zum Inhalts-Schwerpunkt statt zum Mauszeiger
+
+**Was:**
+
+- User-Report nach dem Null-Delta-Fix: Zoom wirkt, aber nicht am Mauszeiger
+  zentriert. Kern-Mathematik war korrekt und testgedeckt
+  (`CameraInfo.zoomAt` hält den Pivot fixiert) — der Fehler saß in der
+  ANWENDUNG: `GraphView.applyCamera` nutzte die Property-API
+  (`worldGroup.setScaleX/Y`), die in JavaFX um das BOUNDS-ZENTRUM
+  pivotiert, nicht um den Ursprung. Die Kamera-Gleichung
+  (screen = world·zoom + offset) verlangt Ursprungs-Pivot — die Ansicht
+  schwenkte deshalb um den Inhalts-Schwerpunkt, und Hit-Tests wären ab
+  zoom ≠ 1 ebenfalls verstimmt gewesen.
+- Beweis vor Fix: PivotProbe (Mini-JavaFX-App) rechnete beide Varianten
+  durch — Property-Scale: (100,100) → (95,95); explizite Scale-Transform:
+  (100,100) → (200,200) = exakt die CameraInfo-Erwartung.
+- Fix (1:1 demo2): `zoomTransform = new Scale()` in
+  `worldGroup.getTransforms()` — Transform-OBJEKTE pivotieren am Ursprung —
+  plus `setTranslateX/Y` für den Offset. Genau demo2s GraphView-Struktur.
+
+**Warum so:**
+
+- Gleiche Fehlerfamilie wie der unsichtbare-R-Bug: ähnlich klingende API,
+  andere Semantik. Zweite Instanz der Regel: demo2-Strukturen wörtlich
+  portieren, nicht „sinngemäß modernisieren" — das Vorbild hatte für jede
+  dieser Fallen schon eine Lösung.
+- Die Probe-Methodik (Mini-App rechnet die Transform-Semantik isoliert
+  durch) hat den Bug bewiesen, ohne auf visuelles Testen warten zu müssen.
+
+**Grenzen & Verbesserungskandidaten:**
+
+- `mvn test`: 114/114 grün (Kern unverändert — der Bug war reine View-
+  Anwendung, erneut die Bestätigung dass die Schichtentrennung greift).
+
+## 30.10.2026 (7. Arbeitsblock) — Fix: Mausrad-Zoom (Null-Delta-Zappeln eliminiert)
+
+**Was:**
+
+- User-Report „Zoom funktioniert nicht". Live-Instrumentierung (temporäre
+  Debug-Prints in Translator + View, User scrollte im echten Fenster)
+  zeigte: Die komplette Kette war intakt — ABER das Log enthüllte pro
+  Mausraste ein **Null-Delta-Begleit-Event** (VNC-Desktop liefert
+  deltaY=0.0 plus das echte ±40). Die Zoom-Regel behandelte 0 wie
+  «nach unten» → pro Raste rein-und-raus-Zappeln, netto fast wirkungslos.
+- Zwei versäumte demo2-Portierungen nachgeholt:
+  1. **delta==0-Wächter** (demo2 GraphView, Zeile 68 — beim ersten Port
+     hatte ich nur den CTRL-Teil der Zeile diskutiert, den delta-Teil
+     übersehen): Null-Delta-Scrolls werden still ignoriert.
+  2. **Zoom-Klemmung 0.2–10.0** (demo2 MIN_SCALE/MAX_SCALE) — jetzt in
+     `CameraInfo.zoomAt` via `Math.clamp`, als einzige Wahrheit.
+- Doppel-Zoom aufgeräumt: Die Zoom-Regel existierte BOTH in
+  `CameraIdleState` (Regel 3) UND `IdleToolState` — in SELECT zoomte jede
+  Raste doppelt (1.1², im Test als 1.21 entlarvt). Zoom gehört allein der
+  Kamera-Maschine: Sie läuft vor jedem Tool-Dispatch und zoomt damit in
+  JEDEM Werkzeug — das demo3-Äquivalent zu demo2s Controller-Zoom.
+- Neue Tests: einmaliger Zoom je Werkzeug (CIRCLE/TEXT/SELECT),
+  Null-Delta-ignoriert (Kamera unverändert), Klemmung an beiden Grenzen.
+
+**Warum so:**
+
+- Debug-Methodik-Lehrstück: Der JavaFX-Robot-Probe scheiterte an der
+  geteilten Remote-Desktop-Umgebung (keine System-Events injizierbar).
+  Der entscheidende Befund kam durch Live-Instrumentierung mit dem USER
+  als physischem Aktuator — auf Remote-Desktops ist der User der
+  zuverlässigste Test-Treiber, und die Debug-Prints machen sein Handeln
+  für den Agenten sichtbar.
+
+**Grenzen & Verbesserungskandidaten:**
+
+- CTRL+Wheel bewusst NICHT übernommen (spec: „Zoom … mit dem Mausrad",
+  ohne Modifier). Randnotiz X11: Wheel-Events gehen ans FOKUSSIERTEN
+  Fenster — ohne vorherigen Klick ins Editor-Fenster kann eine Raste ins
+  Terminal statt in den Editor gehen.
+- `mvn test`: 114/114 grün.
+
+## 30.10.2026 (6. Arbeitsblock) — Fix: unselektierte Rechtecke waren unsichtbar
+
+**Was:**
+
+- User-Diagnose aus dem visuellen Smoke („Sichtbarkeitsproblem"): Ein per
+  R-Tool erzeugtes Rechteck blieb unsichtbar, erschien erst bei Selektion
+  (blauer Glow) und verschwand beim Deselektieren wieder. Modell, Position
+  und Hit-Test waren die ganze Zeit korrekt — reines View-Problem.
+- Ursache: `GraphView.applyStyle` entschied über
+  `instanceof javafx.scene.shape.Rectangle`, ob die gestrichelte Box eines
+  TEXT-Objekts nur bei Selektion sichtbar ist. Kind 0 eines FMC-Rechtecks
+  ist aber derselbe JavaFX-Typ — der Check traf JEDES R und setzte es auf
+  `setVisible(selected)`. Kreise (Kind 0 = javafx Circle) waren vom Check
+  nie betroffen — daher die scheinbar paradoxe Asymmetrie K sichtbar /
+  R unsichtbar.
+- Fix: Typ-Entscheidung über das MODELL (`diagramQuery.findById(id) …
+  instanceof Text`), nicht über den View-Node-Typ; der Node-Check bleibt
+  nur als Absicherung daneben.
+
+**Warum so:**
+
+- Zwei Modell-Typen teilen sich denselben JavaFX-Node-Typ (R-Shape und
+  Text-Box sind beides `javafx.scene.shape.Rectangle`) — `instanceof` auf
+  Node-Typen ist damit mehrdeutig. Typ-Entscheidungen gehören an die
+  Modell-Wahrheit (Query), View-Typen sind Implementierungsdetail.
+- Dritter Fund des User-Smoke-Tests (nach Koordinaten-Basis und dem
+  R-Verdacht selbst): Der Prozess „Kern grün + visuelle Prüfung durch den
+  User" fängt genau die Fehlerklasse, die Headless-Tests prinzipiell
+  nicht sehen können.
+
+**Grenzen & Verbesserungskandidaten:**
+
+- Die Text-Box-Logik wäre noch robuster mit einem expliziten Marker am
+  Node (z. B. `setUserData`) statt Modell-Rückfrage pro Stilwechsel —
+  akzeptabler Kompromiss: `findById` ist O(1) und applyStyle läuft nur
+  bei Selektions-/Hover-Diffs.
+- `mvn test`: 111/111 grün; Smoke ohne Exceptions.
+
+## 30.10.2026 (5. Arbeitsblock) — Koordinaten-Basis-Fix: Klick = Objektmitte
+
+**Was:**
+
+- User-Beobachtung aus dem visuellen Smoke-Test: Objekte entstehen nicht
+  am Klickpunkt, sondern versetzt. Ursache: `InputEventTranslator`
+  publizierte `getSceneX()/getSceneY()` (SZENE-Global — schließt die
+  Toolbar-Breite ein), während die Kern-Kamera und der `GraphView`-Hover
+  zeichenflächen-LOKALE Koordinaten erwarten (`event.getX()/getY()`).
+  Mit der Toolbar oben war der Fehler nur ~40 px vertikal (subtil), seit
+  dem Seitenpanel-Layout ~174 px horizontal — sichtbar falsch.
+- Fix: alle Maus-/Scroll-Koordinaten im Translator auf `getX()/getY()`
+  (flächen-lokal), konsistent mit `GraphView`-Hover und der
+  `CameraInfo`-Basis; Javadoc dokumentiert die Konvention.
+
+**Warum so:**
+
+- Eine Koordinaten-Basis pro System: „Screen" im Kern heißt immer
+  „relativ zur Zeichenfläche" — die Szene gehört der UI-Anordnung
+  (Toolbar), nicht der Kamera. Der Bug war latent seit „Erstes Licht",
+  aber erst die Toolbar-Links-Umstellung machte ihn sichtbar — ein
+  Lehrstück dafür, warum der visuelle Smoke-Test des Users zum Prozess
+  gehört: Headless-Tests können diese Klasse von Fehler prinzipiell
+  nicht sehen (der Kern rechnete konsequent mit der falschen Basis
+  weiter; alle Kern-Tests blieben grün).
+
+**Grenzen & Verbesserungskandidaten:**
+
+- K/R entstehen jetzt mittig zum Klick (Kern-Semantik war längst richtig —
+  nur die Basis war falsch). Freie Texte folgen mit Block 3: Das Modell
+  hat die Mittelpunkt-Konvention für Text-Boxen bereits verbindlich
+  (`Text.x/y` = Mittelpunkt), der künftige Editor-Overlay setzt sie um.
+- `mvn test`: 111/111 grün; Smoke ohne Exceptions.
+
+## 30.10.2026 (4. Arbeitsblock) — Toolbar im demo2-Look
+
+**Was:**
+
+- `ToolbarController` auf demo2s Erscheinungsbild umgebaut (User-Wunsch
+  „visuell wie demo2"): Seitenpanel statt Leiste oben (VBox, 150 px,
+  Sektionen „Shapes"/„Bearbeiten"/„Settings"), Icon-Graphics aus
+  demo2s FXML (Kreis/Rechteck/blaue Linie/fettes „A"), Tooltips mit
+  UNSEREN Shortcuts (K/R/C/T statt demo2s Alt-Kombis), Vollbreiten-Buttons,
+  CSS 1:1 portiert (`src/main/resources/graph/css/style.css`):
+  Hover #e8f4fd, Selektion #dceefb mit blauer Akzentleiste (#3498db).
+  `Main`: Toolbar jetzt `BorderPane.setLeft` statt `setTop`.
+- demo2s „Bearbeiten"-Lücke gefüllt: Undo/Redo als Vollbreiten-Buttons
+  (demo2 hatte keine). Text-Sektion (Font/Bold/Italic), Snap/Sticky,
+  Speichern/Laden bewusst NICHT portiert — tote Controls ohne Funktion;
+  die Blöcke 2–4 bringen sie mit Funktion.
+
+**Warum so:**
+
+- Visuelle Parität ohne Funktionslüge: Nur Controls, die wirklich wirken.
+  demo2s Initial-Zustand (Kreis vorselektiert) wurde NICHT übernommen —
+  demo3s Semantik ist „kein Toggle = Select".
+
+**Grenzen & Verbesserungskandidaten:**
+
+- Beim Portieren entdeckt: demo2s `.graph-grid`-CSS war KAPUTT — JavaFX
+  erlaubt keine Gradients in `-fx-background-image` (nur url()); die Regel
+  erzeugte auch dort nur eine Parse-Warnung und renderte nie. Bewusst
+  NICHT portiert. Ein sichtbares Raster gehört später als echte View-Logik
+  (zusammen mit Move-Snapping, Block 2) in die worldGroup, nicht als
+  statisches CSS-Screen-Muster.
+- `mvn test`: 111/111 grün; `mvn javafx:run`: Smoke ohne Warnungen.
+
+## 30.10.2026 (3. Arbeitsblock) — „Erstes Licht": UI-Schicht (orchestriert)
+
+**Was:**
+
+- Orchestrator-Block in vier Lanes: Explorer-Lotse minete demo2 (Ergebnis
+  u. a.: demo2 nutzte KEIN Canvas, sondern einen Scene-Graph mit
+  mouseTransparent-Picking-AUS — die „zwei Wahrheiten"-Falle der
+  Canvas-Meditation trat dort nie ein; User-Entscheidung nach Vorlage des
+  Befunds: **Scene-Graph stumm** statt Canvas).
+- Kern-Zusätze (eigene Lane, test-first): Drei State→UI-Hinweis-Intents —
+  `ToolChanged` (Toolbar-Sync auch bei Kern-Shortcuts K/R/C/T, vom Bus als
+  Folge-Event publiziert), `ConnectionPreviewChanged` (Kette beim
+  Verbindungsaufbau; sourceId=null räumt auf), `ResizeModeChanged`
+  (Griffe an/aus) — alle Sitzungszustand wie Kamera/Selektion, bewusst
+  KEINE Modell-Fakten, Undo unberührt. Initial-Queries
+  `allObjectsInZOrder()`/`allConnections()` auf DiagramQuery.
+  `SelectTool`-Regeln für die zwei LANGEN Modi (ConnectingState,
+  ResizeModeState), damit Toolbar-Klick sie sauber beendet statt sie
+  hängen zu lassen.
+- Lane Übersetzer (fixer): `InputEventTranslator` + `UiMouseState` —
+  CTRL+Z → `RequestUndo`, CTRL+Y / CTRL+SHIFT+Z → `RequestRedo` als
+  direkte ActionEvents (CustomKeyCode kennt Z/Y bewusst nicht). Beim
+  Verify gefunden und gefixt: CTRL+Y landete zunächst in RequestUndo.
+- Lane Toolbar (fixer): `ToolbarController` — Toggle-Exklusivität manuell
+  verwaltet (`setAllowDeselect` erst ab JavaFX 23), `ToolChanged`-Sync,
+  Undo/Redo-Buttons, Wegpunkte-Checkbox (reine UI-Sichtbarkeit, nie ein
+  Bus-Event). Integrations-Fix: `setFocusTraversable(false)` auf allen
+  Controls — sonst klauen Toolbar-Klicks den Tastaturfokus und Shortcuts
+  landen nicht mehr auf der Zeichenfläche.
+- Lane View (fixer): `GraphView` + `RoutingStrategy`/`RoundedCorner`/
+  `Straight` + `ConnectionViewMapper` — demo2-Algorithmen 1:1 (Pfeilspitze
+  arrowSize 12 / indent 0.65, Ecken via d=r·cot(θ/2) mit Klemmung),
+  Kamera nur APPLIZIERT aus `bus.getCameraInfo()` (nie selbst gerechnet),
+  Hover per `findTopmostAt`-Query („Bus für Zustandsänderungen, Query für
+  Lesewissen — Hover ist Lesewissen"), Preview aus Hinweis + eigenem
+  Maus-Tracking, Resize-Griffe aus `HandlePositions`.
+- Integration (eigener Part): `Main` — Bootstrap identisch zum getesteten
+  BusTestSupport-Muster (zweiphasige Initialisierung), Verdrahtung aller
+  Lanes, requestFocus auf die Zeichenfläche.
+
+**Warum so:**
+
+- „Lesen delegieren, Bauen integrieren": Der Lotse destillierte demo2-
+  Semantik und Portabilität; die Fixer-Lanes arbeiteten gegen exakte
+  Verträge (`GraphView(bus, query)` / `viewRoot()` / `setWaypointsVisible`)
+  mit getrennten Schreibbereichen parallel; Konventionen und Integration
+  blieben in einem Kontext. Kohärenz schlug Parallelität dort, wo die
+  Dateien ineinander greifen.
+- Alle drei Hinweis-Intents folgen einem Muster: Versteckter Kern-Zustand,
+  den die UI nicht besitzen kann (aktives Werkzeug, laufende Kette,
+  Resize-Modus), quert die Grenze als Intent — wie die Text-Editor-Intents
+  vorher. Nie als Modell-Fakt: Der UndoService bleibt unberührt.
+
+**Grenzen & Verbesserungskandidaten:**
+
+- View-z-Ordnung folgt der Fakt-Reihenfolge: Restaurierte Objekte landen
+  visuell OBEN statt an der Originalposition (TODO im GraphView;
+  daten-seitig ist z exakt — ZOrderRestoreTest grün).
+- Verbindungs-Preview nutzt gerade Segmente (freier Abschnitt ohne
+  Rundung) — bewusst einfach.
+- Shortcut-Klicks (K/R/C/T) wirken nicht in langen Modi — nur Toolbar und
+  ESC beenden sie (dokumentiertes Block-1-Restchen).
+- Offene Blöcke: Move-Snapping + Checkbox (Kern zuerst), Inline-Text-Editor
+  (Intents warten seit 28.10.), Layer-System, Persistenz inkl.
+  Undo-Suspend beim Laden.
+- `mvn test`: 111/111 grün; `mvn javafx:run` startet (20 s stabiler
+  Smoke-Lauf: Bootstrap, Initial-Render, Event-Registrierung werfen nicht).
+
 ## 30.10.2026 (2. Arbeitsblock) — Waypoint-Semantik: Routenpunkte statt Objekte
 
 **Was:**

@@ -8,6 +8,7 @@ import de.fmc.editor.core.model.Circle;
 import de.fmc.editor.core.model.DiagramObject;
 import de.fmc.editor.core.model.DiagramQuery;
 import de.fmc.editor.core.model.GridSpec;
+import de.fmc.editor.core.model.ToolType;
 import de.fmc.editor.core.service.SelectionService;
 import de.fmc.editor.core.state.CameraInfo;
 import de.fmc.editor.core.state.impl.CameraIdleState;
@@ -23,6 +24,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.within;
 
 /**
  * Verifiziert, dass der Bus seinen Kamera-Snapshot bei PanView/ZoomView
@@ -87,6 +89,56 @@ class CameraConsistencyTest {
         // Der Welt-Punkt unter dem Pivot (100, 50) bleibt dort:
         assertThat(camera.screenToWorldX(100.0)).isEqualTo(100.0);
         assertThat(camera.screenToWorldY(50.0)).isEqualTo(50.0);
+    }
+
+    @Test
+    @DisplayName("Mausrad-Zoom wirkt in JEDEM Werkzeug — GENAU EINMAL (Kamera-Maschine)")
+    void scrollZoomWorksOnceInEveryTool() {
+        // Die Kamera-Maschine (CameraIdleState) zoomt vor jedem Tool-Dispatch;
+        // früher hatte IdleToolState zusätzlich eine eigene Scroll-Regel und
+        // verdoppelte den Zoom in SELECT (1.1² pro Raste).
+        eventBus.publish(new ActionEvent.SelectTool(ToolType.CIRCLE));
+        eventBus.publish(new InputEvent.MouseScrolled(100.0, 100.0, 1.0));
+        assertThat(eventBus.getCameraInfo().zoom()).isEqualTo(1.1);
+
+        // Auch im Text-Werkzeug und zurück im Select:
+        // 1.0 × 1.1 × 0.9 = 0.99 — bewusst exakt gerechnet, kein „zurück auf 1".
+        eventBus.publish(new ActionEvent.SelectTool(ToolType.TEXT));
+        eventBus.publish(new InputEvent.MouseScrolled(100.0, 100.0, -1.0));
+        assertThat(eventBus.getCameraInfo().zoom()).isCloseTo(1.1 * 0.9, within(1e-9));
+        eventBus.publish(new ActionEvent.SelectTool(ToolType.SELECT));
+        eventBus.publish(new InputEvent.MouseScrolled(100.0, 100.0, 1.0));
+        assertThat(eventBus.getCameraInfo().zoom()).isCloseTo(1.1 * 0.9 * 1.1, within(1e-9));
+    }
+
+    @Test
+    @DisplayName("Null-Delta-Scroll (VNC-Begleit-Event) lässt die Kamera UNVERÄNDERT")
+    void nullDeltaScrollIsIgnored() {
+        // VNC-/hochauflösende Treiber liefern pro Raste oft ein Null-Delta-
+        // Begleit-Event. Früher wirkte 0 wie «nach unten» und zappelte den
+        // Zoom rein/raus — demo2 mied das mit demselben Wächter.
+        eventBus.publish(new ActionEvent.SelectTool(ToolType.CIRCLE));
+        eventBus.publish(new InputEvent.MouseScrolled(100.0, 100.0, 0.0));
+        assertThat(eventBus.getCameraInfo().zoom()).isEqualTo(1.0);
+        assertThat(eventBus.getCameraInfo().offsetX()).isEqualTo(0.0);
+        assertThat(eventBus.getCameraInfo().offsetY()).isEqualTo(0.0);
+    }
+
+    @Test
+    @DisplayName("Zoom klemmt an den Grenzen 0.2–10.0 (demo2-Konvention)")
+    void zoomClampsToBounds() {
+        // Von 1.0 aus 60-mal um 0.9 verkleinern: ohne Klemmung 0.0011,
+        // mit Klemmung bleibt die Kamera bei MIN_ZOOM stehen.
+        for (int i = 0; i < 60; i++) {
+            eventBus.publish(new ActionEvent.ZoomView(0.9, 0.0, 0.0));
+        }
+        assertThat(eventBus.getCameraInfo().zoom()).isEqualTo(CameraInfo.MIN_ZOOM);
+
+        // Und am oberen Ende:
+        for (int i = 0; i < 60; i++) {
+            eventBus.publish(new ActionEvent.ZoomView(1.1, 0.0, 0.0));
+        }
+        assertThat(eventBus.getCameraInfo().zoom()).isEqualTo(CameraInfo.MAX_ZOOM);
     }
 
     @Test

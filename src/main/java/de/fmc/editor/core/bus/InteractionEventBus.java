@@ -6,12 +6,14 @@ import de.fmc.editor.core.event.InputEvent;
 import de.fmc.editor.core.model.DiagramQuery;
 import de.fmc.editor.core.model.GridSpec;
 import de.fmc.editor.core.model.SelectionQuery;
+import de.fmc.editor.core.model.ToolType;
 import de.fmc.editor.core.state.CameraInfo;
 import de.fmc.editor.core.state.CameraState;
 import de.fmc.editor.core.state.InteractionContext;
 import de.fmc.editor.core.state.InteractionState;
 import de.fmc.editor.core.state.impl.CameraIdleState;
 import de.fmc.editor.core.state.impl.IdleToolState;
+import de.fmc.editor.core.state.impl.ToolState;
 
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -19,9 +21,22 @@ import java.util.function.Consumer;
 
 public class InteractionEventBus implements EventBusPublisher {
 
+    // Diagnose-Hilfe: State-Übergänge live auf der Konsole (A -> B + auslösendes
+    // Event), vollständige synchron zum Editor (alles läuft auf dem JavaFX-
+    // Application-Thread). Aktivierung: FMC_TRACE_STATES=true mvn javafx:run
+    // (Umgebungsvariable wirkt auch in geforkten JVMs) oder -Dfmc.traceStates=true.
+    // Default aus — hält die Test-Ausgabe sauber.
+    private static final boolean STATE_TRACE =
+            Boolean.getBoolean("fmc.traceStates")
+                    || "true".equalsIgnoreCase(System.getenv("FMC_TRACE_STATES"));
+
     // 1. Zwei parallele State-Machines (Ansatz C)
     private InteractionState toolState = new IdleToolState();
     private CameraState cameraState = new CameraIdleState();
+
+    // Aktives Werkzeug (Session-Zustand, read-only getrackt) — Grundlage
+    // für den ToolChanged-Hinweis an die UI (Toolbar-Sync).
+    private ToolType currentTool = ToolType.SELECT;
 
     // Read-Only-Dependencies für den InteractionContext
     private final DiagramQuery diagramQuery;
@@ -41,6 +56,21 @@ public class InteractionEventBus implements EventBusPublisher {
         this.cameraInfo = cameraInfo;
         this.gridSpec = gridSpec;
         this.selectionQuery = selectionQuery;
+        if (STATE_TRACE) {
+            System.out.println("[Tool]   initial: " + toolState.getClass().getSimpleName()
+                    + "   [Camera] initial: " + cameraState.getClass().getSimpleName());
+        }
+    }
+
+    /** Diagnose-Ausgabe eines Maschinen-Übergangs — nur bei KLASSEN-Wechsel
+     *  (gleiche Klasse = neues Exemplar desselben Zustands, keine Zeile). */
+    private <T> void traceTransition(String machine, T before, T after, DomainEvent event) {
+        if (!STATE_TRACE || before.getClass() == after.getClass()) {
+            return;
+        }
+        System.out.println("[" + machine + "] " + before.getClass().getSimpleName()
+                + " -> " + after.getClass().getSimpleName()
+                + "  (" + event.getClass().getSimpleName() + ")");
     }
 
     public <T extends DomainEvent> void subscribe(Class<T> eventType, Consumer<T> subscriber) {
@@ -60,15 +90,29 @@ public class InteractionEventBus implements EventBusPublisher {
         // 2. Kamera-Machine ZUERST verarbeiten
         // Reagiert auf InputEvents sowie Initiierungs-Events wie RequestCameraPan
         if (event instanceof InputEvent || event instanceof ActionEvent.RequestCameraPan) {
+            CameraState before = this.cameraState;
             this.cameraState = cameraState.handleInput(event, context);
+            traceTransition("Camera", before, this.cameraState, event);
         }
 
         // 3. Tool-Machine NUR verarbeiten, wenn die Kamera NICHT aktiv panned
         if (!cameraState.isActive()) {
             // Reagiert auf InputEvents ODER Steuerungs-Events von der UI (z.B. SelectTool)
             if (event instanceof InputEvent || event instanceof ActionEvent.SelectTool) {
+                InteractionState before = this.toolState;
                 this.toolState = toolState.handleInput(event, context);
+                traceTransition("Tool", before, this.toolState, event);
             }
+        }
+
+        // 3b. Toolbar-Sync: Hat der Übergang das WERKZEUG geändert (nicht nur
+        // den Gesten-State), merke einen ToolChanged-Hinweis. Gesten-States
+        // ohne Tool-Typ (Connecting, Moving, ResizeMode, ...) lassen den
+        // zuletzt aktiven Tool-Typ implizit unverändert.
+        ActionEvent.ToolChanged toolHint = null;
+        if (toolState instanceof ToolState ts && ts.toolType() != currentTool) {
+            currentTool = ts.toolType();
+            toolHint = new ActionEvent.ToolChanged(currentTool);
         }
 
         // 3a. Kamera-Snapshot aktualisieren: PanView/ZoomView sind Fakten, die
@@ -84,6 +128,13 @@ public class InteractionEventBus implements EventBusPublisher {
         // 4. Event an alle externen Subscriber verteilen (Canvas, DiagramService, etc.)
         for (var subscriber : subscribers) {
             subscriber.accept(event);
+        }
+
+        // 5. ToolChanged als Folge-Hinweis NACH dem Versand des auslösenden
+        // Events. Rekursionstiefe 1: ToolChanged ist weder InputEvent noch
+        // SelectTool — die State-Machines ignorieren ihn, kein Loop.
+        if (toolHint != null) {
+            publish(toolHint);
         }
     }
 

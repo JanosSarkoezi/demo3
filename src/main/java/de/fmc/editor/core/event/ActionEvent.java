@@ -140,4 +140,40 @@ public sealed interface ActionEvent extends DomainEvent {
 
     record RequestRedo() implements ActionEvent {
     }
+
+    // --- State→UI-Hinweise (Sitzungszustand, KEINE Modell-Fakten: nicht
+    // undo-fähig, vom UndoService bewusst ignoriert — wie Kamera/Selektion).
+    // Die Richtung ist die gleiche wie bei den Editor-Intents oben: Der Kern
+    // informiert die UI über Zustand, den sie selbst nicht besitzen kann.
+
+    /** Hinweis: Das aktive Werkzeug hat sich geändert (Toolbar-Sync — auch
+     *  bei Shortcut-Wechseln K/R/C/T, die die UI nicht selbst verursacht).
+     *  Publiziert vom Bus nach jedem State-Übergang mit neuem Tool-Typ. */
+    record ToolChanged(ToolType tool) implements ActionEvent {
+    }
+
+    /** Hinweis: Der Verbindungsaufbau läuft / seine Kette hat sich geändert.
+     *  sourceId = Start-Objekt, waypoints = bisherige Kettenpunkte (Kopie).
+     *  sourceId == null heißt: Keine Vorschau (Geste beendet oder abgebrochen).
+     *  Der freie Abschnitt vom letzten Punkt zur Maus zeichnet die UI selbst
+     *  aus ihrer eigenen Mausposition — dafür braucht es kein Event. */
+    record ConnectionPreviewChanged(UUID sourceId, List<Waypoint> waypoints) implements ActionEvent {
+    }
+
+    /** Hinweis: Resize-Modus für genau dieses Objekt betreten (Doppelklick;
+     *  nur K/R — die UI zeigt die Griffe). target == null: Modus verlassen
+     *  (Klick daneben, ESC, Toolbar-Wechsel). Griff-Positionen liefert die UI
+     *  aus HandlePositions — der Griff-Drag läuft über den Kern. */
+    record ResizeModeChanged(DiagramObject target) implements ActionEvent {
+    }
+
+    /** Hinweis: Live-Vorschau einer laufenden Resize-Geste — die Geometrie,
+     *  die der KERN für den aktuellen Drag-Zustand berechnet (symmetrisch ums
+     *  Zentrum, Grid-Klemmung; dieselbe Mathematik wie der spätere Commit).
+     *  preview == null: Vorschau-Ende (Commit oder Abbruch) — die View stellt
+     *  die Geometrie dann aus dem Modell her (beim Abbruch kommt KEIN Fakt).
+     *  Sitzungszustand, KEIN Modell-Fakt, kein Undo-Punkt. Der Commit bleibt
+     *  genau EIN ResizeObject/ResizeCircle beim Loslassen. */
+    record ResizePreviewChanged(DiagramObject preview) implements ActionEvent {
+    }
 }

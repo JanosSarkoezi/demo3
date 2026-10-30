@@ -29,6 +29,7 @@ public final class IdleToolState extends ToolState {
                         // Resize-Modus nur für K/R — Waypoints sind Routenpunkte
                         // ohne Griffe: Der Doppelklick selektiert sie nur.
                         if (target.get() instanceof Circle || target.get() instanceof Rectangle) {
+                            c.publisher().publish(new ActionEvent.ResizeModeChanged(target.get()));
                             return new ResizeModeState(target.get());
                         }
                     }
@@ -97,13 +98,6 @@ public final class IdleToolState extends ToolState {
     }
 
     private void registerDefaultRules() {
-        // Zoom-Regel (funktioniert immer)
-        addRule(InputEvent.MouseScrolled.class, (e, c) -> {
-            double factor = e.deltaY() > 0 ? 1.1 : 0.9;
-            c.publisher().publish(new ActionEvent.ZoomView(factor, e.x(), e.y()));
-            return this;
-        });
-
         // Werkzeug-Wechsel (Toolbar + Shortcuts) — zentral in ToolState
         registerToolSwitching();
 

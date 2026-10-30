@@ -1,0 +1,62 @@
+/* --- Toolbar Styles (1:1 aus demo2 portiert) --- */
+.toolbar {
+    -fx-background-color: #f4f4f4;
+    -fx-border-color: #cccccc;
+    -fx-border-width: 0 1 0 0;
+}
+
+.tool-icon-circle, .tool-icon-rect {
+    -fx-fill: #f4f4f4;
+    -fx-stroke: #000;
+    -fx-stroke-width: 1.5;
+}
+
+.tool-button {
+    -fx-alignment: CENTER_LEFT;
+    -fx-content-display: LEFT;
+    -fx-graphic-text-gap: 10;
+    -fx-background-color: transparent;
+    -fx-border-color: transparent;
+    -fx-border-width: 0 0 0 4;
+}
+
+.tool-button:hover {
+    -fx-background-color: #e8f4fd;
+}
+
+.tool-button:selected {
+    -fx-background-color: #dceefb;
+    -fx-border-color: #3498db;
+    -fx-border-width: 0 0 0 4;
+}
+
+.tool-button:selected .tool-icon-circle,
+.tool-button:selected .tool-icon-rect {
+    -fx-fill: #aaaaaa;
+}
+
+.tool-button:selected .label {
+    -fx-text-fill: #0078d7;
+    -fx-font-weight: bold;
+}
+
+.section-label {
+    -fx-font-weight: bold;
+    -fx-text-fill: #555;
+    -fx-padding: 5 0 2 0;
+}
+
+/* --- Settings & Checkboxen (aus demo2 portiert) --- */
+.settings-checkbox {
+    -fx-text-fill: #444;
+    -fx-font-size: 11px;
+    -fx-cursor: hand;
+}
+
+.settings-checkbox .box {
+    -fx-background-radius: 3;
+}
+
+.settings-checkbox:selected .mark {
+    -fx-background-color: #3498db; /* Passend zum blauen Tool-Akzent */
+}
