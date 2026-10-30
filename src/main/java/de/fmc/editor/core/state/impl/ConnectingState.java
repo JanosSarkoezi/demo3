@@ -10,6 +10,7 @@ import de.fmc.editor.core.state.rule.BaseState;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 public final class ConnectingState extends BaseState {
@@ -33,6 +34,14 @@ public final class ConnectingState extends BaseState {
                     double worldY = c.camera().screenToWorldY(e.y());
 
                     var hitObject = c.diagram().findTopmostAt(worldX, worldY);
+
+                    // Waypoints sind keine Verbindungsziele (Routenpunkte,
+                    // keine Objekte): Ein Klick auf ein vorhandenes W setzt
+                    // einen NEUEN Waypoint in die entstehende Kette — genau
+                    // wie ein Klick ins Leere.
+                    if (hitObject.isPresent() && hitObject.get() instanceof Waypoint) {
+                        hitObject = Optional.empty();
+                    }
 
                     if (hitObject.isPresent()) {
                         DiagramObject target = hitObject.get();

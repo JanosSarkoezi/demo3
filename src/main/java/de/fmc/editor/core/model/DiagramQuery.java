@@ -45,4 +45,16 @@ public interface DiagramQuery {
     default Optional<TextAnchor> projectOntoConnection(UUID connectionId, double worldX, double worldY) {
         return Optional.empty();
     }
+
+    /**
+     * Effektive Move-Menge einer Verschiebe-Geste zu einer Auswahl-Basis:
+     * die Basis selbst, plus ihre externen Label (wandern mit ihrem Owner),
+     * plus die Waypoints vollselektierter Verbindungen (beide Endpunkte in
+     * der Basis — die Route gehört zur Verbindung und wandert als Ganzes
+     * mit; teilselektierte bleiben verankert). Default: die Basis
+     * unverändert — Stubs bleiben stumm.
+     */
+    default List<UUID> findMoveSet(List<UUID> basisIds) {
+        return List.copyOf(basisIds);
+    }
 }

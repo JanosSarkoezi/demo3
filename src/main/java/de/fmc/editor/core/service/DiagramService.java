@@ -436,12 +436,12 @@ public class DiagramService implements DiagramQuery {
 
     @Override
     public Optional<DiagramObject> findTopmostAt(double worldX, double worldY) {
-        // zOrder rückwärts = oberstes Objekt zuerst.
-        // Waypoints sind keine Klick-Ziele (sonst trafe ein Klick beim
-        // Verbindungsaufbau versehentlich einen vorhandenen Waypoint).
+        // zOrder rückwärts = oberstes Objekt zuerst. Waypoints sind volle
+        // Klick-Ziele (Routenpunkte zum Umformen der Route); der
+        // Verbindungsaufbau filtert sie selbst heraus (siehe ConnectingState).
         for (int i = zOrder.size() - 1; i >= 0; i--) {
             DiagramObject obj = objects.get(zOrder.get(i));
-            if (obj == null || obj instanceof Waypoint) {
+            if (obj == null) {
                 continue;
             }
             if (hit(obj, worldX, worldY)) {
@@ -458,15 +458,15 @@ public class DiagramService implements DiagramQuery {
 
     /**
      * Liefert alle Objekte, deren Bounding-Box das Welt-Rechteck schneidet —
-     * in z-Ordnung (unten -> oben, deterministisch). Waypoints sind keine
-     * Band-Ziele, solange sie keine Klick-Ziele sind (Layer-Sichtbarkeit fehlt).
+     * in z-Ordnung (unten -> oben, deterministisch). Waypoints sind volle
+     * Band-Ziele (Punkt-im-Rechteck): sie sind selektierbare Routenpunkte.
      */
     @Override
     public List<DiagramObject> findObjectsInBounds(double minX, double minY, double maxX, double maxY) {
         List<DiagramObject> result = new ArrayList<>();
         for (UUID id : zOrder) {
             DiagramObject obj = objects.get(id);
-            if (obj == null || obj instanceof Waypoint) {
+            if (obj == null) {
                 continue;
             }
             if (boundsIntersect(obj, minX, minY, maxX, maxY)) {
@@ -474,6 +474,36 @@ public class DiagramService implements DiagramQuery {
             }
         }
         return result;
+    }
+
+    /**
+     * Effektive Move-Menge zu einer Auswahl-Basis: die Basis selbst, ihre
+     * externen Label (wandern mit ihrem Owner) und die Waypoints
+     * VOLLSELEKTierter Verbindungen (beide Endpunkte in der Basis) — die
+     * Route gehört zur Verbindung und wandert als Ganzes mit. Teilselektierte
+     * Verbindungen bleiben verankert. Verankerte Texte filtert onMoveObjects
+     * still heraus (ihre Position ist abgeleitet).
+     */
+    @Override
+    public List<UUID> findMoveSet(List<UUID> basisIds) {
+        List<UUID> moveSet = new ArrayList<>(basisIds);
+        for (UUID id : basisIds) {
+            for (UUID textId : findTextIdsOwnedBy(id)) {
+                if (!moveSet.contains(textId)) {
+                    moveSet.add(textId);
+                }
+            }
+        }
+        for (Connection conn : connections.values()) {
+            if (basisIds.contains(conn.sourceId()) && basisIds.contains(conn.targetId())) {
+                for (UUID waypointId : conn.waypointIds()) {
+                    if (!moveSet.contains(waypointId)) {
+                        moveSet.add(waypointId);
+                    }
+                }
+            }
+        }
+        return moveSet;
     }
 
     public Optional<Connection> findConnectionById(UUID id) {
@@ -590,7 +620,8 @@ public class DiagramService implements DiagramQuery {
                              && r.y() + r.height() / 2 >= minY && r.y() - r.height() / 2 <= maxY;
             case Text t      -> t.x() + t.width() / 2 >= minX && t.x() - t.width() / 2 <= maxX
                              && t.y() + t.height() / 2 >= minY && t.y() - t.height() / 2 <= maxY;
-            case Waypoint w  -> false; // oben gefiltert — der Vollständigkeit halber
+            case Waypoint w  -> w.x() >= minX && w.x() <= maxX
+                             && w.y() >= minY && w.y() <= maxY;
         };
     }
 

@@ -4,6 +4,12 @@ Was habe ich so geplant fuer den FMC-Editor:
 - Erstellen von Kreisen (K) und Rechtecken (R) durch Auswahl eines Tools an der Seite. Also ein Tool fuer Ks udn eins fuer Rs.
 - Erstellen von Verbindugen durch die Auswahl eines Tool an der Seite.
   - Klick auf das Start Objekt (zB K), dann moegliche zwischenpunkte (Waypoints W), und klick auf das Ziel Objekt (zB R). Es koennen 0-n Zwischenpunkte geben. Diese werden durch eine Linie verbunden und an den Ecken abgerunde. Wo die Linie endet, wird ein pfeil zu sehen sein.
+  - Die Ws sind Routenpunkte ihrer Verbindung — Teil der Verbindung, keine eigenstaendigen Objekte. Sie sind die Erfindung, den Polygonzug von K nach R zu formen. Daraus ergibt sich:
+    - Ws lassen sich per Klick oder Gummiband selektieren und einzeln verschieben, um die Form der Route nach eigenem Geschmack zu veraendern. Doppelklick auf ein W selektiert es nur (keine Resize-Griffe — Ws haben keine Groesse).
+    - Sind BEIDE Endobjekte einer Verbindung in der Auswahl, wandern ihre Ws mit der gesamten Auswahl mit — die Route gehoert zur Verbindung, ihre Form bleibt erhalten. Das gilt auch dann, wenn die Ws gerade nicht sichtbar sind: Der Benutzer denkt in dem Moment nicht an unsichtbare Ws und erwartet, dass die ganze Verbindung mitkommt.
+    - Ist nur EIN Endobjekt (oder keines) der Verbindung in der Auswahl, bleiben die Ws an ihrem Ort verankert.
+    - Feinsteuerung: Klick auf die Verbindung blendet den W-Layer ein (siehe Ebenen); danach lassen sich die Ws einzeln greifen und verschieben.
+    - Waehrend des Verbindungsaufbaus gilt ein Klick auf ein vorhandenes W wie ein Klick auf die leere Flaeche: Es wird ein NEUER Zwischenpunkt an dieser Stelle gesetzt. Ws sind keine Verbindungsziele.
 - Verschieben von ausgewaehlten Objekten. Die Auswahl kann ein oder mehrere Objekte enhalten. Diese konnen sowohl Ks, Rs und Ws sien.
   - Beim Verschieben soll ein virtuelles Netz die Objekte an den Kreuzungspunkten kleben lassen bis die Maus naeher an dem neuen Kreuzungspunkt liegt. Spapping.
 - Auswahl von Objekten (Selektion):

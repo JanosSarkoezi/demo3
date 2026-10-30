@@ -4,6 +4,8 @@ import de.fmc.editor.core.event.ActionEvent;
 import de.fmc.editor.core.event.CustomKeyCode;
 import de.fmc.editor.core.event.CustomMouseButton;
 import de.fmc.editor.core.event.InputEvent;
+import de.fmc.editor.core.model.Circle;
+import de.fmc.editor.core.model.Rectangle;
 import de.fmc.editor.core.model.ToolType;
 
 import java.util.ArrayList;
@@ -24,7 +26,11 @@ public final class IdleToolState extends ToolState {
                     var target = c.diagram().findTopmostAt(worldX, worldY);
                     if (target.isPresent()) {
                         c.publisher().publish(new ActionEvent.SetSelection(List.of(target.get().id())));
-                        return new ResizeModeState(target.get());
+                        // Resize-Modus nur für K/R — Waypoints sind Routenpunkte
+                        // ohne Griffe: Der Doppelklick selektiert sie nur.
+                        if (target.get() instanceof Circle || target.get() instanceof Rectangle) {
+                            return new ResizeModeState(target.get());
+                        }
                     }
                     return this;
                 });
@@ -74,22 +80,16 @@ public final class IdleToolState extends ToolState {
                     c.publisher().publish(new ActionEvent.SetSelection(newSelection));
 
                     // Verschiebe-Menge: die Auswahl, sofern sie das Ziel enthält
-                    // (Ctrl-Toggle-out zieht nur das Ziel selbst) — plus die
-                    // externen Label der Basis-Objekte: Sie wandern mit ihrem
-                    // Owner, auch wenn sie selbst nicht selektiert sind.
-                    // Verankerte Texte filtert der DiagramService beim Move
-                    // still heraus (ihre Position ist abgeleitet).
+                    // (Ctrl-Toggle-out zieht nur das Ziel selbst). Die effektive
+                    // Menge berechnet der DiagramService (findMoveSet): Basis
+                    // plus externe Label plus Waypoints vollselektierter
+                    // Verbindungen — die Route gehört zur Verbindung und
+                    // wandert als Ganzes mit. Verankerte Texte filtert der
+                    // DiagramService beim Move still heraus (Position abgeleitet).
                     List<UUID> base = newSelection.contains(targetId)
                             ? newSelection
                             : List.of(targetId);
-                    List<UUID> movingIds = new ArrayList<>(base);
-                    for (UUID id : base) {
-                        for (UUID textId : c.diagram().findTextIdsOwnedBy(id)) {
-                            if (!movingIds.contains(textId)) {
-                                movingIds.add(textId);
-                            }
-                        }
-                    }
+                    List<UUID> movingIds = c.diagram().findMoveSet(base);
 
                     // Klick auf Objekt -> Verschieben vorbereiten
                     return new PendingMoveState(movingIds, e.x(), e.y());

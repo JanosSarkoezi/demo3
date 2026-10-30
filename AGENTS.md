@@ -177,6 +177,12 @@ Bus ↔ Service: `new DiagramService()` → `new InteractionEventBus(service, �
   nächstgelegene Connection gewinnt), `projectOntoConnection(connectionId, x, y)` →
   `TextAnchor` (Offset = Klick − Ankerpunkt: Das Label sitzt, wo geklickt
   wurde — Kreation frei, Snapping greift erst beim Verschieben).
+* **Move-Mengen-Query** `findMoveSet(basisIds)` (Default auf `DiagramQuery`,
+  überschrieben im Service): die effektive Move-Menge ist eine reine Funktion
+  der Auswahl-Basis — Basis selbst + externe Label + Waypoints
+  VOLLSELEKTierter Verbindungen (beide Endpunkte in der Basis). Der State
+  (IdleToolState) ruft nur diese eine Query; Move-Expander-Wissen liegt nie
+  inline in States.
 
 ### 4. Auswahl, Grid & Handles (read-only im Interaktions-Kontext)
 * **`SelectionService`** (`core.service`): hält die geordnete, duplikatfreie
@@ -256,9 +262,10 @@ ein `BaseStateTest` beweist die Invariante direkt. Konsequenzen:
 * **Tool-States** (`core.state.impl`): `IdleToolState` (Zoom, Hit-Test,
   Selektion bei Press — einfach = exklusiv,
   Ctrl+Klick = Toggle, Leere/ESC = leeren —, DEL = Auswahl löschen,
-  Doppelklick → `ResizeModeState`; movingIds = Auswahl bzw. Ziel ∪
-  `findTextIdsOwnedBy` — externe Label wandern mit ihrem Owner mit, auch
-  ohne eigene Selektion),
+  Doppelklick → `ResizeModeState` (nur K/R; Ws sind Routenpunkte ohne
+  Griffe — Doppelklick selektiert sie nur); movingIds =
+  `findMoveSet(Auswahl bzw. Ziel)` — effektive Move-Menge aus dem Service
+  (Basis + externe Label + Ws vollselektierter Verbindungen)),
   `CircleToolState` / `RectangleToolState` / `ConnectToolState`,
   `TextToolState` (EINE Press-Regel, Verzweigungen in der Aktion: Klick auf
   K/R → `EditTextOfObject`; Ctrl+Klick auf K/R → `CreateTextFor(owner)`;
@@ -267,7 +274,9 @@ ein `BaseStateTest` beweist die Invariante direkt. Konsequenzen:
   projiziertem Anker; Leere → `CreateTextFor(null)`; ESC → Idle),
   `PendingCreateOrPanState` (Klick-oder-Drag-Entscheidung), `MovingState`,
   `PendingMoveState`, `PendingBoxSelectState` (Gummiband: Ctrl+Leerraum-Drag,
-  stumm bis zum Release, EIN `SetSelection`), `ConnectingState` (Waypoints sammeln, ESC bricht ab),
+  stumm bis zum Release, EIN `SetSelection`), `ConnectingState` (Waypoints sammeln,
+  ESC bricht ab; Klick auf ein vorhandenes W gilt wie Leerraum — neuer
+  Kettenpunkt, Ws sind keine Verbindungsziele),
   `ResizeModeState` (Auswahl + Handles, Griff-Hit-Test) und
   `HandleDragState` (Resize-Geste: intern sammeln, Commit beim Loslassen).
 * **Kamera-States**: `CameraIdleState`, `CameraPanningState`
@@ -398,10 +407,17 @@ Beim Umsetzen dieser Features die obigen Goldenen Regeln einhalten:
    entfernen. Eine Lösch-Geste = ein Undo-Punkt (Composite).
 2. **Undo/Redo:** Ja, Anforderung. Pro Geste genau ein Command; Redo-Stack
    leert sich bei neuer Aktion.
-3. **Move-Semantik:** Waypoints bleiben stehen; Connections folgen ihren
-   Endpunkt-IDs automatisch; externe Texte wandern mit — in demo3 als
-   eigener Fakt vom DiagramService publiziert (demo2 löste das versteckt in
-   der Registry — nicht kopieren).
+3. **Move-Semantik:** Ws sind Routenpunkte ihrer Verbindung, keine
+   eigenständigen Objekte (sie formen den Polygonzug K→R). Daraus:
+   Selektierbar per Klick/Gummiband (Umformen durch direkten Griff);
+   **vollselektierte Verbindung** (beide Endpunkte in der Auswahl) → die
+   Ws wandern als Ganzes mit; teilselektiert → Ws bleiben verankert;
+   Connections folgen ihren Endpunkt-IDs automatisch; externe Texte
+   wandern mit — in demo3 als eigener Fakt vom DiagramService publiziert
+   (demo2 löste das versteckt in der Registry — nicht kopieren). Die
+   Move-Menge berechnet zentral `findMoveSet` (reine Funktion der
+   Auswahl-Basis). Geteilte Ws über zwei Verbindungen sind konzeptionell
+   eine Anomalie (ein W gehört genau einer Route).
 4. **Text-UX:** Klick erzeugt Platzhalter und öffnet sofort den
    Inline-Editor; ENTER committet (nur bei Änderung ein Undo-Punkt), ESC
    verwirft, Klick daneben committet; Doppelklick auf Text = erneut

@@ -182,8 +182,8 @@ class BoxSelectionTest {
     }
 
     @Test
-    @DisplayName("Waypoints sind keine Gummiband-Ziele")
-    void waypointsAreNotBandTargets() {
+    @DisplayName("Waypoints sind volle Gummiband-Ziele (Routenpunkte, selektierbar)")
+    void waypointsAreBandTargets() {
         Circle a = addCircle(100.0, 100.0);
         Rectangle rect = addRectangle(300.0, 100.0);
         Waypoint waypoint = new Waypoint(UUID.randomUUID(), 200.0, 100.0, defaultLayerId);
@@ -193,6 +193,6 @@ class BoxSelectionTest {
         performBand(0.0, 0.0, 400.0, 200.0);
 
         assertThat(selectionFacts.getLast().selectedIds())
-                .containsExactly(a.id(), rect.id());
+                .containsExactly(a.id(), rect.id(), waypoint.id());
     }
 }
