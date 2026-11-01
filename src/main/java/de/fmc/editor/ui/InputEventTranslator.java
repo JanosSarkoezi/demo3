@@ -25,8 +25,10 @@ public class InputEventTranslator {
 
     private final EventBusPublisher publisher;
     private final UiMouseState mouseState;
+    private final Node eventRoot;
 
     public InputEventTranslator(Node eventRoot, EventBusPublisher publisher, UiMouseState mouseState) {
+        this.eventRoot = eventRoot;
         this.publisher = publisher;
         this.mouseState = mouseState;
 
@@ -51,6 +53,22 @@ public class InputEventTranslator {
         };
     }
 
+    /**
+     * Ziel-Greife: Nur Events der Zeichenfläche SELBST übersetzen. Der
+     * Inline-Editor ist ein KIND des Canvas-Root — seine Tasten und Klicks
+     * laufen in der Capture-Phase durch die Root-Filter und würden sonst in
+     * den Kern leaken: getippte Werkzeug-Buchstaben (K/R/C/T) wechselten das
+     * Tool, CTRL+Z löste Core-Undo statt Text-Undo aus, ESC erreichte den
+     * Kern (User-Fund im Stufe-A-Smoke-Test). Echte Canvas-Events haben
+     * immer den Root als Ziel — alle Modell-Nodes sind mouseTransparent,
+     * das Picking endet am Root. Overlay-Controls sind wie die Toolbar
+     * (BorderPane-Sibling, kommt nie hier an) none of the translator's
+     * business.
+     */
+    private boolean isFromCanvas(javafx.event.Event event) {
+        return event.getTarget() == eventRoot;
+    }
+
     private CustomMouseButton deriveButton(MouseEvent event) {
         MouseButton button = event.getButton();
         if (button == null || button == MouseButton.NONE) {
@@ -66,22 +84,48 @@ public class InputEventTranslator {
     }
 
     private void onMousePressed(MouseEvent event) {
+        if (!isFromCanvas(event)) {
+            return; // Klick in ein Overlay (Editor): weder Fokus noch Kern.
+        }
+        // Jeder Klick auf die Zeichenfläche holt den Tastatur-Fokus zurück:
+        // JavaFX-Regionen übernehmen den Fokus beim Klick NICHT von selbst —
+        // ein Textfeld (Snap-to-Grid-Eingabe, Inline-Editor) behielte ihn
+        // sonst dauerhaft und ESC/DEL/Shortcuts erreichten den Übersetzer
+        // nie mehr (User-Fund im visuellen Test 1.11.).
+        eventRoot.requestFocus();
+
+        // Press-Position für den Inline-Editor festhalten (er öffnet an der
+        // Klick-Stelle, nicht an der letzten Move-Position — Press ohne
+        // vorheriges Move wäre sonst ein Blindflug).
+        mouseState.setScreenX(event.getX());
+        mouseState.setScreenY(event.getY());
+        mouseState.setInside(true);
+
         publisher.publish(new InputEvent.MousePressed(
                 event.getX(), event.getY(),
                 mapButton(event.getButton()), event.getClickCount(), event.isControlDown()));
     }
 
     private void onMouseDragged(MouseEvent event) {
+        if (!isFromCanvas(event)) {
+            return; // Text-Selektieren im Editor ist keine Canvas-Geste.
+        }
         publisher.publish(new InputEvent.MouseDragged(
                 event.getX(), event.getY(), deriveButton(event)));
     }
 
     private void onMouseReleased(MouseEvent event) {
+        if (!isFromCanvas(event)) {
+            return;
+        }
         publisher.publish(new InputEvent.MouseReleased(
                 event.getX(), event.getY(), mapButton(event.getButton())));
     }
 
     private void onMouseMoved(MouseEvent event) {
+        if (!isFromCanvas(event)) {
+            return; // Maus über dem Editor: Position nicht verfälschen.
+        }
         mouseState.setScreenX(event.getX());
         mouseState.setScreenY(event.getY());
         mouseState.setInside(true);
@@ -92,11 +136,17 @@ public class InputEventTranslator {
     }
 
     private void onScroll(ScrollEvent event) {
+        if (!isFromCanvas(event)) {
+            return;
+        }
         publisher.publish(new InputEvent.MouseScrolled(
                 event.getX(), event.getY(), event.getDeltaY()));
     }
 
     private void onKeyPressed(javafx.scene.input.KeyEvent event) {
+        if (!isFromCanvas(event)) {
+            return; // Getippte Zeichen gehören dem Editor, nie dem Kern.
+        }
         KeyCode code = event.getCode();
         if (code == KeyCode.Z || code == KeyCode.Y) {
             if (event.isControlDown() && event.isShiftDown()) {
@@ -122,6 +172,9 @@ public class InputEventTranslator {
     }
 
     private void onKeyReleased(javafx.scene.input.KeyEvent event) {
+        if (!isFromCanvas(event)) {
+            return;
+        }
         CustomKeyCode mapped = mapKey(event.getCode());
         if (mapped != null) {
             publisher.publish(new InputEvent.KeyReleased(mapped));

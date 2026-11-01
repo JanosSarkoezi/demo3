@@ -22,6 +22,19 @@ public record CameraInfo(
         return (screenY - offsetY) / zoom;
     }
 
+    /** Rechnet Welt-X in Bildschirm-X um — die Inverse zu screenToWorldX
+     *  (z. B. platziert der Inline-Editor seinen Overlay screen-genau über
+     *  einem Welt-Objekt; die View selbst braucht das nicht, sie rendert
+     *  Welt-Koordinaten in die transformierte worldGroup). */
+    public double worldToScreenX(double worldX) {
+        return worldX * zoom + offsetX;
+    }
+
+    /** Rechnet Welt-Y in Bildschirm-Y um — Inverse zu screenToWorldY. */
+    public double worldToScreenY(double worldY) {
+        return worldY * zoom + offsetY;
+    }
+
     /** Liefert eine um (deltaX, deltaY) verschobene Kamera (Bildschirm-Pixel). */
     public CameraInfo panBy(double deltaX, double deltaY) {
         return new CameraInfo(zoom, offsetX + deltaX, offsetY + deltaY, defaultLayerId);

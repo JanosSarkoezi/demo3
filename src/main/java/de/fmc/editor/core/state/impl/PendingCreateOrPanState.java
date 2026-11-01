@@ -6,6 +6,7 @@ import de.fmc.editor.core.event.InputEvent;
 import de.fmc.editor.core.model.Circle;
 import de.fmc.editor.core.model.Rectangle;
 import de.fmc.editor.core.model.ToolType;
+import de.fmc.editor.core.model.Waypoint;
 import de.fmc.editor.core.state.InteractionState;
 import de.fmc.editor.core.state.rule.BaseState;
 
@@ -35,21 +36,35 @@ public final class PendingCreateOrPanState extends BaseState {
                     return returnToToolState(); // Tool pausiert und geht zurück in Grundzustand
                 });
 
-        // 2. Loslassen ohne Drag -> Element an Welt-Koordinaten erzeugen
+        // 2. Loslassen ohne Drag -> Element an Welt-Koordinaten erzeugen —
+        //    aber NUR auf freier Fläche: Ein Klick auf ein bestehendes
+        //    Objekt ist ein stiller No-Op. Ohne diesen Hit-Test entstünden
+        //    deckungsgleiche Stapel, die praktisch unselektierbar sind
+        //    (findTopmostAt entscheidet nach z-Order — Auswahl-Lotterie).
+        //    Waypoints sind KEINE Blocker: Außerhalb des RouteEditMode sind
+        //    sie unsichtbar (Sitzungszustand der UI) und dürfen Klicks nicht
+        //    verschlucken — dasselbe Filter-Muster wie im ConnectingState.
         addRule(InputEvent.MouseReleased.class,
                 e -> e.button() == button,
                 (e, c) -> {
                     // Bildschirm-Pixel in Welt-Koordinaten umrechnen
+                    // (Press-Position: Dorthin zielte der Klick).
                     double worldX = c.camera().screenToWorldX(startScreenX);
                     double worldY = c.camera().screenToWorldY(startScreenY);
 
-                    // Je nach aktivem Werkzeug Objekt erzeugen
-                    if (activeTool == ToolType.CIRCLE) {
-                        var circle = new Circle(UUID.randomUUID(), worldX, worldY, 20.0, c.camera().defaultLayerId());
-                        c.publisher().publish(new ActionEvent.AddElement(circle));
-                    } else if (activeTool == ToolType.RECTANGLE) {
-                        var rect = new Rectangle(UUID.randomUUID(), worldX, worldY, 40.0, 30.0, c.camera().defaultLayerId());
-                        c.publisher().publish(new ActionEvent.AddElement(rect));
+                    var hit = c.diagram().findTopmostAt(worldX, worldY);
+                    boolean blockedByObject = hit.isPresent()
+                            && !(hit.get() instanceof Waypoint);
+
+                    if (!blockedByObject) {
+                        // Je nach aktivem Werkzeug Objekt erzeugen
+                        if (activeTool == ToolType.CIRCLE) {
+                            var circle = new Circle(UUID.randomUUID(), worldX, worldY, 20.0, c.camera().defaultLayerId());
+                            c.publisher().publish(new ActionEvent.AddElement(circle));
+                        } else if (activeTool == ToolType.RECTANGLE) {
+                            var rect = new Rectangle(UUID.randomUUID(), worldX, worldY, 40.0, 30.0, c.camera().defaultLayerId());
+                            c.publisher().publish(new ActionEvent.AddElement(rect));
+                        }
                     }
 
                     return returnToToolState();

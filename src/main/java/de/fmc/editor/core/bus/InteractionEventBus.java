@@ -44,7 +44,11 @@ public class InteractionEventBus implements EventBusPublisher {
     // aktualisiert ihn selbst bei PanView/ZoomView (siehe publish) — sonst
     // rechnen alle nachfolgenden Interaktionen mit veralteten Offsets/Zoom.
     private CameraInfo cameraInfo;
-    private final GridSpec gridSpec;
+    // Ebenfalls getrackter Sitzungswert: Die Rasterweite ist über
+    // SetGridSize zur Laufzeit wählbar (Toolbar „Snap to Grid") — der Bus
+    // tauscht die GridSpec aus, jeder Folge-Event rechnet mit dem neuen
+    // Raster. Wie die Kamera: Sitzungszustand, nie Modellinhalt.
+    private GridSpec gridSpec;
     private final SelectionQuery selectionQuery;
 
     private final List<Consumer<DomainEvent>> subscribers = new CopyOnWriteArrayList<>();
@@ -123,6 +127,17 @@ public class InteractionEventBus implements EventBusPublisher {
             this.cameraInfo = cameraInfo.panBy(pan.deltaX(), pan.deltaY());
         } else if (event instanceof ActionEvent.ZoomView zoom) {
             this.cameraInfo = cameraInfo.zoomAt(zoom.zoomFactor(), zoom.pivotX(), zoom.pivotY());
+        }
+
+        // 3a-2. Rasterweite: zweiter getrackter Sitzungswert nach der Kamera.
+        // Ungültige Werte (<= 0, NaN, unendlich) werden still ignoriert —
+        // das Raster bleibt; die GridSpec-Konstruktion würde sonst werfen
+        // und einen UI-Eingabefehler zum Crash machen.
+        if (event instanceof ActionEvent.SetGridSize gridSize) {
+            double size = gridSize.gridSize();
+            if (Double.isFinite(size) && size > 0.0) {
+                this.gridSpec = new GridSpec(size);
+            }
         }
 
         // 4. Event an alle externen Subscriber verteilen (Canvas, DiagramService, etc.)

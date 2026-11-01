@@ -3,6 +3,597 @@
 Chronik der Arbeitssessions — die neuesten Einträge stehen OBEN. Format: Datum / Was / Warum so / Grenzen & Verbesserungskandidaten.
 (Die aktuelle Architektur-Wahrheit steht in der AGENTS.md — hier nur Entscheidungen und ihre Begründung.)
 
+## 03.11.2026 (18. Arbeitsblock) — Verbindungs-Selektion & -Löschung
+
+**Was:**
+
+- Plain-Klick auf eine Verbindung selektiert sie (blauer Glow auf dem
+  Pfad; ihre Ws zeigt die View abgeleitet mit — sichtbar + blau, aber
+  NICHT in der Auswahl). CTRL+Klick betritt den RouteEditMode (vorher war
+  es der Plain-Klick). DEL auf die Verbindungs-Auswahl löscht die
+  Verbindung samt Ws + Verbindungs-Label, die Endpunkte bleiben — EIN
+  Undo-Punkt stellt alles wieder her. Drag an der Verbindung ist bewusst
+  ein No-Op. `DeleteObjects` löst Connection-IDs über die bestehende
+  Kaskade auf (kein Parallel-Request); `SelectionService` staubt jetzt
+  auch über `ConnectionsRemoved`; `findMoveSet` filtert Connection-IDs
+  (sonst wäre das Verbindungs-Label Move-BASIS und würde beim Drag
+  re-ankert statt gleiten).
+- Doppelklick auf die Verbindungskette aus dem Idle bleibt EINE Geste:
+  Modus-Eintritt + W-Einfügen; trifft der Doppelklick ein bestehendes
+  (unsichtbares) W, wird es nur selektiert. Der Press(1) derselben Geste
+  selektiert die Verbindung (neue Plain-Klick-Semantik).
+- Kern-zuerst umgesetzt und verifiziert, bevor die View entstand:
+  `ConnectionSelectionTest` (vom 02.11. als User-Entwurf vorgeschrieben,
+  auf das 03.11.-Design umgeschrieben — Selektion nur Connection-ID,
+  Drag = No-Op statt W-Move, plus neuer Move-Mengen-Reinheits-Test),
+  `RouteEditModeTest`/`WaypointSelectionMoveTest`/`SnapToGridTest` auf
+  CTRL-Einstieg umgestellt. **179 Tests grün** (vorher 171).
+- View: `applyConnectionStyle` mit blauem Selektions-Glow (Prio über
+  Hover), abgeleitete W-Markierung (`selectedConnectionWaypointIds`) mit
+  Sichtbarkeit „Modus-Flag ODER Selektion".
+- Doku: AGENTS.md (Abschnitte 3, 4, 6, 8, Geplant), tools.md (SELECT-
+  Tabelle + RouteEdit-Modus), hier.
+
+**Warum so:**
+
+- Lücke war real: Verbindungen waren previously gar nicht löschbar (nur
+  über ihre Endpunkte). User-Idee: uniformes „alles ist klick-/selektier-
+  bar" — passt zur EINE-Auswahl-Menge-Architektur.
+- Connection-ID statt „Connection + alle Ws" in der Auswahl: Ws sterben
+  als Service-Kaskade (wie Owned-Texte — demo2-Lektion: Kaskaden leben
+  als sichtbare Fakten, nie als Auswahl-Mitglieder), und die Move-Menge
+  bleibt sauber. Mitmarkieren wäre Schönfärberei mit Move-Basis-Folgeschäden.
+- Drag = No-Op statt W-Move (02.11.-Entwurf): eliminiert die ganze
+  Problemklasse „verankertes Label als Delta-Mitnehmer re-ankert statt
+  gleitet" — der 02.11.-Testkommentar nannte das selbst „kritischen
+  Nebenaspekt". Route-Editing bleibt im RouteEditMode beheimatet.
+- Kein neuer Delete-Request: Der mechanische Undo braucht keine neuen
+  Op-Typen (Inverse `AddConnection` + `RestoreObjects` existierten für
+  die Endpunkt-Kaskade bereits). Früh-Return über BOTH doomed-Stores,
+  sonst wäre eine Direktverbindung ohne Ws still kein No-Op sondern ein
+  Nichts.
+- Distilliert: neuer lokaler Skill `selectable-entity-kind-integration`;
+  Gotcha in `derived-positions-converging-undo` auf das 03.11.-Design
+  korrigiert (Stand dort war noch der 02.11.-Entwurf).
+
+**Grenzen & Verbesserungskandidaten:**
+
+- Redo einer Verbindungs-Löschung läuft über `DeleteObjects(W- und
+  Label-IDs)` + `RemoveConnections` — dabei entsteht ein intermediäres
+  `ConnectionsUpdated` (Prune vor dem Entfernen). Konvergiert korrekt und
+  bleibt vom Replay-Guard aus der History, aber Fakten-Rauschen für
+  Subscriber; ein dedizierter Replay-Pfad wäre sauberer.
+- View-z-Ordnung bleibt Fakt-Reihenfolge (altes Block-1-Restchen).
+- Visueller Smoke-Test (javafx:run) noch offen — Selektion nur kern-seitig
+  verifiziert.
+
+## 02.11.2026 (17. Arbeitsblock) — Stufe C: Verbindungs-Label — der Inline-Editor ist KOMPLETT
+
+**Was:**
+
+- Der letzte Editor-Zweig: `CreateConnectionText` (Klick mit Text-Werkzeug
+  NAHE einer Verbindung) bekommt seinen Konsumenten. Der Editor öffnet an
+  der Klick-Stelle (dieselbe Position wie bei freiem Text — der Anker-Offset
+  ist per Definition „Klick − Ankerpunkt", also sind Klick und abgeleitete
+  Label-Mitte identisch); der Commit publiziert `AddAnchoredText` mit dem
+  vom WERKZEUG projizierten Anker, und der SERVICE leitet die Position ab —
+  derselbe Ableitungspfad wie beim Gleiten. Geometrie-Wissen bleibt damit
+  vollständig im Kern; die Session führt nur den Anker als Absicht mit
+  (Record-Feld `anchor`, Komfort-Konstruktor hält alle bisherigen Zweige
+  null-kompatibel).
+- Damit ist das W-Gleiten aus Block 12 erstmals im echten Ablauf sichtbar:
+  Label folgen Verformungen der Kette (W ziehen, Endpunkt verschieben,
+  Gruppen-Move), Drag auf das Label re-ankert (t + Abstand), Doppelklick
+  öffnet den Resize-Modus auf der Label-Box. Nachbearbeiten läuft über den
+  EditText-Zweig (das Werkzeug prüft die 0..1-Kardinalität — Klick auf eine
+  Verbindung mit Label öffnet es statt ein zweites anzulegen).
+- **Null Kern-Aufwand, null neue Kern-Tests:** Geste (TextToolTest),
+  Schreibpfad (TextModelTest), Gleiten/Re-Ankerung (TextGlidingTest) und
+  Kaskade waren vollständig vorgebaut — der Architektur-Slogan der Staffelung
+  („Kern zuerst") zahlt die letzte Rate ein. **171 Tests unverändert grün.**
+- Doku: AGENTS.md — die große UI-Überschrift („Erstes Licht" → Stufe A/B/C)
+  und der Top-Callout aufgefrischt (User-Anstoß: „Ist das noch die große
+  Überschrift?"), alle Stufen-Vermerke auf ✅ komplett; tools.md
+  (T-Werkzeug-Zeile mit Gleit-Beschreibung, Restchen-Streichung Stufe C);
+  Zentriert-Schalter-UI als offenes Restchen VERMERKT mit „User hat eigene
+  Ideen" (bewusst nicht weiter ausgearbeitet).
+
+**Warum so:**
+
+- Editor-Position aus dem mouseState statt eigener Anker-Geometrie: Der
+  Service ist die einzige Stelle, die Anker in Positionen übersetzt — hätte
+  der Editor dieselbe Rechnung, gäbe es zwei Wahrheiten, die driften könnten
+  (die demo2-Krankheit in klein). Die Klick-Äquivalenz macht die Duplikation
+  überflüssig.
+- Der Anker reist in der Session statt neu projiziert zu werden: Die
+  Projektion gehört zur Geste (wo geklickt wurde), nicht zum Commit — wer
+  beim Commit neu projiziert, riskierte eine andere Intention als die, die
+  der Klick ausdrückte.
+
+**Grenzen & Verbesserungskandidaten:**
+
+- Das Text-Feature ist damit bis auf den „Zentriert"-Schalter komplett
+  (User hat eigene Ideen, Klärung ausstehend) und die Serialisierung
+  (`Text`/`label`/`content` ins DTO — Persistence-Block).
+- View-Politur später: Der Editor-Overlay zeigt getippten Text oben links
+  und springt nach dem Commit in die zentrierte Darstellung.
+- Der Klick-Nahe-Toleranzbereich des Text-Werkzeugs deckt sich mit dem
+  RouteEditMode-Eintritt (8 px) — beabsichtigt, aber beim Testen beachten:
+  Mit TEXT-Werkzeug angeklickte Verbindungen öffnen den Editor, nicht den
+  RouteEditMode.
+
+## 02.11.2026 (16. Arbeitsblock) — Mini: R-Inhalt vertikal zentrieren
+
+**Was:**
+
+- User-Wunsch aus dem Stufe-B-Smoke-Test: R höher ziehen → der Inhalt soll
+  in der Mitte der Box sitzen, nicht an der Oberkante kleben. Zwei Zeilen
+  in der View: `VPos.CENTER` statt `VPos.TOP` bei der Node-Erzeugung,
+  `setY(r.y())` statt Oberkante beim Update.
+- **Damit ist die Schalter-Semantik vorentschieden** (User-Entscheidung):
+  Die vertikale Zentrierung gilt IMMER — „in der Mitte der Box" ist die
+  Grundhaltung eines R-Inhalts. Der spätere „Zentriert"-Schalter (spec:
+  „Schalter je R") steuert nur die HORIZONTALE Ausrichtung. Das sollte
+  festgehalten sein, bevor das Schalter-UI gebaut wird.
+- Kern/Modell/Editor unberührt — der Commit schreibt nur content/centered,
+  die Darstellung leistet allein die View. Kein Kern-Test betroffen,
+  **171 Tests unverändert grün**; Verifikation per visuellem Smoke-Test
+  (R mit mehrzeiligem Inhalt in der Höhe resizen → Block bleibt mittig).
+
+**Warum so:**
+
+- Drei Kandidaten für „die Box" abgeklärt, bevor gebaut wurde (R-Inhalt /
+  freier Text / Editor-Overlay): Freie Texte zentrieren längst beide Achsen
+  (Mittelpunkt-Konvention), der Editor-Overlay-Sprung ist separate
+  View-Politur. Die Empfehlung in der Klärungsfrage traf zu — gebaut wurde
+  nur der echte Gap.
+
+**Grenzen & Verbesserungskandidaten:**
+
+- Der Editor-Overlay zeigt getippten Text noch oben links und springt nach
+  dem Commit in die (jetzt vertikal wie horizontal) zentrierte Darstellung —
+  View-Politur für einen späteren Block.
+
+## 02.11.2026 (15. Arbeitsblock) — Bugfix: Ziel-Greife gegen Editor-Event-Lecks
+
+**Was:**
+
+- User-Fund aus dem Stufe-B-Smoke-Test: Tippt man im Inline-Editor ein Wort
+  mit „r", wechselt das Werkzeug auf Rechteck — entsprechend k/c/t. Die
+  Ursache ist die JavaFX-Capture-Phase: Der Editor-Overlay ist ein KIND des
+  Canvas-Root, seine Key-Events laufen deshalb durch die Root-Filter des
+  `InputEventTranslator`, bevor sie die TextArea erreichen. Betroffen war
+  mehr als die Werkzeug-Buchstaben: CTRL+Z löste Core-Undo statt Text-Undo
+  aus, ESC erreichte den Kern (obwohl die Doku verspricht, dass es das nie
+  tut), und Klicks im Editor Editor fokussierten die Fläche zurück.
+- Fix: Ziel-Greife im Übersetzer — `event.getTarget() == eventRoot` als
+  Eintrittsbedingung ALLER Handler (Pressed/Released/Dragged/Moved, Scroll,
+  Key-Pressed/-Released). Echte Canvas-Events haben immer den Root als Ziel
+  (alle Modell-Nodes sind mouseTransparent, das Picking endet am Root);
+  Overlay-Controls sind wie die Toolbar (BorderPane-Sibling) kein Geschäft
+  des Übersetzers. Derselbe Greife im Hover-Filter der View — über dem
+  Editor wird der letzte Glow gelöscht statt stehen zu bleiben.
+- Kein Kern-Kontakt, kein neuer Test (JavaFX-Kante, per Smoke-Test
+  verifiziert) — **171 Tests unverändert grün**.
+
+**Warum so:**
+
+- Der Greife gehört in den ÜBERSETZER, nicht in den Editor: Nicht der
+  Editor muss sich gegen den Kern schützen, sondern die Übersetzungsstelle
+  muss definieren, was überhaupt übersetzt wird. Damit ist „ESC erreicht
+  den Kern nie" keine Konvention mehr, sondern am Systemrand erzwungen —
+  und jedes künftige Overlay-Control (Stufe-C-Editor, Property-Panel,
+  Kontextmenü) ist automatisch ausgenommen.
+- Symptom-gegen-Ursache: Ein Editor-seitiger Key-Filter (consume in der
+  Capture-Phase) hätte die Buchstaben blockiert, aber die TextArea-eigenen
+  Handler MIT — consume bricht die gesamte weitere Zustellung ab. Der
+  Ziel-Greife lässt die Events der TextArea unbehelligt und filtert nur
+  die Übersetzung.
+
+**Grenzen & Verbesserungskandidaten:**
+
+- MOUSE_EXITED bleibt bewusst ungegreift (setzt nur UI-Zustand zurück).
+- Beim Fokus-Verlust des Editors (z. B. Fensterwechsel) committet er
+  (noch) nicht — Klick-daneben und CTRL+ENTER decken den Normalfall ab.
+
+## 02.11.2026 (14. Arbeitsblock) — Stufe B (R-Inhalt) + Text-Resize + Text-Hover
+
+**Was:**
+
+- **Stufe B — Text ins R:** `EditTextOfObject` auf ein Rectangle bekommt
+  seinen Editor-Zweig: Die gemeinsame mehrzeilige TextArea sitzt über der
+  R-Innenbox (Geometrie − Innenrand, konsistent mit der View-Renderung),
+  Screen-Minimum 140×60 (sonst wäre der Editor über kleinen Rs untippen
+  dünn). Commit NUR den Inhalt als `SetRectangleContent` mit unangetastetem
+  centered-Default (User-Entscheidung: Schalter-UI später, eigener Ort);
+  frischer Modell-Read beim Commit statt Session-Kopie. Gratis sichtbar
+  geworden: R mit Inhalt resizen — die Innenbox ist abgeleitet, der
+  mehrzeilige Text fließt beim Resizen automatisch mit (View konnte das
+  längst, hatte nur nie Inhalt).
+- **Text-Resize (test-first, +3 Tests):** Der Doppelklick-Guard im
+  `IdleToolState` lässt Text-Objekte in den Resize-Modus (8 gemeinsame
+  ofBox-Griffe); `HandleDragState` bekommt den Text-Zweig — ausgerechnet in
+  eine gemeinsame `boxGeometry`-Methode extrahiert, weil R und Text
+  dieselbe symmetrische Box-Mathematik nutzen (Ecken beide Dimensionen,
+  Seiten eine, Grid-Klemmung). Commit als `ResizeBox` — der Service-Zweig
+  existierte seit 28.10. Tests: Doppelklick auf Text öffnet den Modus,
+  Eckengriff symmetrisch (Commit erst beim Loslassen, Modus bleibt),
+  Seitengriff eindimensional.
+- **Text-Hover:** `GraphView.applyStyle` zeigt den gestrichelten Text-Box-
+  Rahmen jetzt bei Selektion ODER Hover — zuvor glühte der Glow auf einer
+  unsichtbaren Box, Texte schienen ohne Hover-Feedback (User-Fund aus dem
+  Stufe-A-Smoke-Test).
+- Doku: tools.md (T-Abschnitt, Resize-Modus-Abschnitt, Restchen-Streichung
+  „Resize nur K/R"), AGENTS.md (IdleToolState-Bullet, Editor-Bullet,
+  Stufen-Vermerke, Resize-Zeile in der Übersicht) — **171 Tests gesamt,
+  grün**.
+
+**Warum so:**
+
+- Die Frage „löst Stufe B indirekt das Resize-Problem?" war berechtigt —
+  die Antwort ist dreigeteilt: R-Inhalt-Resize war längst gebaut (nur
+  unsichtbar ohne Inhalt), Text-Objekt-Resize brauchte genau zwei Kern-
+  Stellen (Guard + HandleDragState-Zweig), Hover war eine View-Zeile. Die
+  Bestandsaufnahme vor dem Block hat verhindert, dass am Falschen gebaut
+  wird.
+- Die `boxGeometry`-Extraktion statt Copy-Paste: R und Text teilen sich die
+  ofBox-Griffe, dieselbe Mathematik gehört einmalig in eine Methode —
+  Preview und Commit laufen ohnehin über denselben Pfad (30.10.-Prinzip
+  „der Kern ist die einzige Rechen-Wahrheit").
+- Test-first hat sich bezahlt gemacht: Der Doppelklick-auf-Text-Test war
+  rot, bevor der Guard geöffnet wurde — die drei neuen Tests beweisen die
+  Geste als reinen Event-Flow, bevor irgendein JavaFX-Verhalten geprüft
+  wird (Goldene Regel 2).
+
+**Grenzen & Verbesserungskandidaten:**
+
+- Der „Zentriert"-Schalter (spec: „Schalter je R") hat noch keinen UI-Ort —
+  Default bleibt zentriert; Kandidat: Checkbox im Editor-Overlay (mit dem
+  Text als EIN Undo-Punkt committet).
+- Stufe C (Verbindungs-Label) ist der letzte Editor-Zweig — mit ihm wird
+  das W-Gleiten aus Block 12 im echten Ablauf sichtbar.
+- Verankerte Texte nehmen am Resize teil (nur Maße ändern, Position bleibt
+  abgeleitet) — bewusst erlaubt; ein Test dafür fehlt noch (Kandidat für
+  den Stufe-C-Block, wo verankerte Texte überhaupt erst entstehen können).
+
+## 02.11.2026 (13. Arbeitsblock) — Stufe A: Inline-Text-Editor (freier Text, K/R-Label, K-Buchstabe)
+
+**Was:**
+
+- Der lang erwartete Konsument der Text-Werkzeug-Intents:
+  `InlineTextEditorController` (ui-Paket) abonniert `CreateTextFor`,
+  `EditTextOfObject` (Kreis) und `EditText` — drei der vier Intents haben
+  damit ihren Lebenslauf komplett (Geste im Kern getestet → Intent →
+  Editor → Commit-Request → Fakt → View).
+- **EINE Komponente, zwei Node-Typen:** TextArea für alles Mehrzeilige
+  (freier Text, externes K/R-Label unterhalb des Owners, Nachbearbeiten
+  bestehender Texte mit vormarkiertem Inhalt), TextField für den
+  K-Buchstaben (TextFormatter begrenzt auf 1 Zeichen, ENTER committet —
+  User-Entscheidung 02.11.: mehrzeilig überall, ENTER = Umbruch,
+  CTRL+ENTER = Commit).
+- **Kleinigkeiten mit großer Wirkung:**
+  - `CameraInfo.worldToScreenX/Y` (neu, Roundtrip-getestet in
+    `CameraConsistencyTest`): Der Editor platziert screen-genau über
+    Welt-Objekten; die View selbst bleibt reine Welt-Koordinaten.
+  - `InputEventTranslator.onMousePressed` hält die Press-Position im
+    `UiMouseState` fest (Press ohne vorheriges Move wäre ein Blindflug).
+  - `GraphView.addToScreenOverlay/removeFromScreenOverlay`: Editor-Overlay
+    im Bildschirm-Raum des Root wie das Band-Rechteck.
+- **Drei Disziplinen des Editors:** (1) „Klick daneben committet" konsumiert
+  den Klick — der Press-Filter steht in der Filter-Kette VOR dem Übersetzer
+  (Main konstruiert den Editor zuerst; Registrierungsfolge = Aufruffolge),
+  der Commit-Klick erreicht den Kern nie, der nächste Klick wirkt normal
+  (spec-Entscheidung). (2) Das Modell wird erst beim Commit berührt: ESC
+  kostet nichts (demo2-Lesson), leerer Commit verwirft still, „nur bei
+  Änderung" für Label/Edit. (3) Kamera eingefroren während des Editierens
+  (Scroll konsumiert) — die gespeicherte Welt-Position bleibt gültig.
+- Kern blieb unangetastet (alle Schreibpfade längst getestet); View rendert
+  Text-Content und K-Label bereits seit „Erstes Licht" — **168 Tests grün**
+  (+1 CameraInfo-Roundtrip).
+- **`doc/tools.md`** (User-Wunsch, gleiche Session): Bedienungs-Referenz je
+  Werkzeug und Modus — Auslöser, Aktionen, Erwartung, Verlassen; Kamera und
+  Editor-Overlay als eigene Abschnitte; offene Stufen B/C als markierte
+  Restchen. Doppeltes Nutzen: Onboarding UND Abhakliste für den visuellen
+  Smoke-Test. Drei Doku-Ebenen damit sauber getrennt: spec.md = Produktvision,
+  tools.md = Bedienung, AGENTS.md = Architektur.
+
+**Warum so:**
+
+- Der Editor ist reiner UI-Sitzungszustand: Kein Platzhalter-Objekt, keine
+  Core-Events für ESC — der Zustand „es wird editiert" gehört der UI, genau
+  wie Kamera und Selektion. Der UndoService sieht nur die Commits (AddElement
+  = ein Undo-Punkt; SetCircleLabel/UpdateText via TextChanged-Merge).
+- Filter-Reihenfolge statt Flag-Geplänkel: Der konsumierende Filter muss
+  physisch VOR dem Übersetzer-Filter in der Kette stehen — Main macht das
+  durch Konstruktionsreihenfolge explizit (ein Kommentar vor Ort dokumentiert
+  die Invariante, damit sie kein Refactoring versehentlich umdreht).
+- Die View brauchte nichts: Text-Rendering (Wrap, Mittelpunkt-Konvention)
+  und K-Label existierten seit 30.10. — die Staffelung „Kern zuerst" zahlt
+  sich aus, jetzt wo der erste Konsument andockt.
+
+**Grenzen & Verbesserungskandidaten:**
+
+- Stufe B (R-Inhalt: Editor über der R-Box, `SetRectangleContent` inkl.
+  centered-Schalter) und Stufe C (`CreateConnectionText` → `AddAnchoredText`,
+  dann ist auch das W-Gleiten sichtbar) docken nur neue Zweige an die fertige
+  Komponente an.
+- Headless nicht testbar (JavaFX-Overlay) — die Disziplinen folgen dem
+  Muster der Fokus-Falle: Der visuelle Smoke-Test des Users ist die
+  Verifikation (Kern-Anteile sind längst grün).
+- Der K-Buchstaben-Editor nimmt jedes 1 Zeichen an (auch Ziffern/Satzzeichen)
+  — eine Buchstaben-Filterung wäre Produktpolitik, bewusst offen.
+- Editor-Größe ist fix (Neu: 140×60 Welt-Einheiten); Auto-Grow beim Tippen
+  ist View-Politur für später.
+
+## 02.11.2026 (12. Arbeitsblock) — W-Gleiten & Re-Ankerung: Verbindungs-Label folgen der Kette
+
+**Was:**
+
+- Vorbereitung auf den UI-Text-Editor (Block 3): Die beiden Kern-Semantiken
+  für verankerte Verbindungs-Label, die die Diskussion mit dem User als
+  Pflicht festlegte — kein UI nötig, reine Kernarbeit nach Goldener Regel 2.
+- **W-Gleiten (Stufe 0):** Jede Ketten-Verformung leitet die Positionen
+  verankter Texte aus ihren UNVERÄNDERTEN Ankern neu ab — W-/Endpunkt-Move
+  (im selben `ObjectsMoved`-Batch-Fakt, hinter den Ketten-Objekten),
+  Gruppen-Move beider Endpunkte (der Alltagsfall: vorher blieb das Label
+  leer zurück, weil sein Owner die Connection ist und nicht in `findMoveSet`
+  liegt), singuläre Delta-Moves, `AddWaypoint`, W-Löschen (Index klemmt bei
+  der Ableitung — t/Offset bleiben Absicht) sowie die Restore-Pfade
+  (`RestoreObjects`, `AddConnection` — Undo des W-Löschens konvergiert hier).
+  Einfüge-Fall: Anker-Indizes hinter der Einfügestelle wandern mit (+1,
+  `ObjectTextChanged`; Geometrie und Position unverändert), Anker auf dem
+  geteilten Abschnitt behalten (index, t) und gleiten auf die erste Hälfte.
+- **Re-Ankerung durch Drag (Stufe 0b):** MoveObjects/MoveObject auf einen
+  verankerten Text projiziert die Zielposition auf die Kette (geteilte
+  Wahrheit mit `projectOntoConnection`) und schreibt die Platzierungs-
+  Absicht (t + Offset) neu — pro Drag-Segment ein `ObjectTextChanged`, das
+  bestehende Undo-Merge macht die Geste zu EINEM Undo-Punkt. Damit ist der
+  alte stille Skip NUR noch auf dem mechanischen Restore-Pfad
+  (`MoveObjectTo`) — bewusste Asymmetrie: Gesten schreiben Absichten,
+  mechanische Inverses lassen die Ableitung aus der LIFO-Kette gewinnen.
+- `TextGlidingTest` (12 Tests): Gleiten im selben Batch, Alltagsfall
+  Gruppen-Move, Selectivität (freie/Owner-Label unberührt), vertikale
+  Linie (Links-Rechts-Drag = nur Offset — das Lesbarkeits-Szenario des
+  Users), Drag-Merge = 1 Undo-Punkt, Einfüge-Index-Wanderung, Lösch-
+  Klemmung, Undo/Redo-Konvergenz. TextModelTest an 2 Stellen auf die neue
+  Semantik umgestellt (MoveObjectTo-Skip dokumentiert; Lösch-Klemmung
+  läuft jetzt automatisch statt per manuellem SetAnchor-Nachschuss) —
+  **167 Tests gesamt, grün**.
+- Doku: AGENTS.md Abschnitt 3 (zwei neue Ist-Zustand-Bullets statt des
+  Move-Skip-Paragraphen), Text-Feature-✅ ergänzt, W-Gleiten aus der
+  Offen-Liste entfernt (die alte Begründung „heute sind W-Moves unmöglich"
+  war seit Block 2 stale — Fund aus der Planungs-Diskussion).
+- **Spec-Sync** (User-Wunsch, gleiche Session): doc/spec.md an die Entschei-
+  dungen angepasst — RouteEditMode statt W-Layer-Schalter (inkl. Doppelklick-
+  Einfügen), Shortcuts K/R/C/T, konfigurierbarer Snapping-Abstand, Undo/Redo
+  (stand noch gar nicht in der spec), Bewegbarkeit externer/freier Texte,
+  Topmost-Regel, Gruppen-Move-Gleiten, W-Einfüge-Index-Wanderung, Klick-
+  daneben konsumiert den Klick. Bemerkenswert: Die spec hatte Re-Ankerung,
+  Gleiten und Lösch-Klemmung der Verbindungs-Label bereits vorausgesehen —
+  die alten Zeilen 35-37 beschrieben exakt Stufe 0/0b.
+- **Editor-Key-Entscheidung** (User, gleiche Session): Der mehrzeilige
+  Inline-Editor (freier Text, R-Inhalt, Verbindungs-Label — EINE Komponente)
+  nutzt ENTER als Zeilenumbruch und committet per CTRL+ENTER; nur der
+  K-Buchstabe committet mit ENTER. Spec-Zeile „ENTER schließt ab" entsprechend
+  präzisiert — Diagramm-Tool-Konvention (draw.io/PowerPoint) schlug die
+  ursprüngliche Kurz-Label-Annahme. Verbindungs-Label ausdrücklich ebenfalls
+  mehrzeilig (User-Wunsch: „keine Restriktionen — überall so viel
+  hinschreiben, wie er will"); einzige Ausnahme bleibt der K-Buchstabe.
+
+**Warum so:**
+
+- **Der Anker ist die Absicht, x/y die Konsequenz:** Das User-Argument
+  „näher am R platzieren / links der vertikalen Linie" ist relational —
+  genau die zwei Freiheitsgrade (t, Offset), die der Anker speichert. Ein
+  Drag schreibt die Absicht neu, das Gleiten bewahrt sie; das System kann
+  dem User damit nie etwas wegnehmen, das er nicht zuletzt selbst
+  ausgedrückt hat.
+- **Undo ohne zweites Kaskade-Wissen:** Die Gleit-Einträge im Batch-Fakt
+  sind beim Undo-Inverse (MoveObjectTo) stille No-Ops — die echte
+  Wiederherstellung passiert durch dieselbe Ableitung, sobald die LIFO-
+  Disziplin die Kette zurückgestellt hat. Der UndoService blieb UNVERÄNDERT
+  (null Zeilen geändert): Die Inversions-Philosophie „bei verankerten leitet
+  der Service aus der per LIFO wiederhergestellten Geometrie ab" (28.10.
+  dokumentiert) trägt den neuen Fall gratis.
+- **Fakt-Ordnung als Konvergenz-Garantie:** Gleit-Einträge NACH den
+  Ketten-Objekten im Batch; Restore-Pfade leiten nach jedem Teilschritt
+  erneut ab (AddConnection mit noch fehlenden W-Objekten → polyPoints
+  überspringt tolerant → Zwischenstände sind falsch, der Endzustand
+  konvergiert exakt — die View-Konvergenz-Fix-Pattern von Block 2 lässt
+  beliebige Fakt-Reihenfolgen zu).
+
+**Grenzen & Verbesserungskandidaten:**
+
+- Sichtbar „in Aktion" ist das Gleiten erst mit dem UI-Editor (Stufe C
+  erzeugt die ersten verankerten Label im echten Ablauf); heute beweisen es
+  nur die Event-Flow-Tests.
+- Projektions-Ties (Ziel gleich nah an zwei Abschnitten) gewinnen den
+  früheren Abschnitt (striktes <) — deterministisch, aber willkürlich;
+  falls spüren wir im visuellen Test, könnte die Projektion den aktuellen
+  Abschnitt des Textes bevorzugen.
+- Ein „Lösen"-Geste (Ctrl-Drag → `SetAnchor(null)`, Label wird absolut)
+  ist bewusst NICHT Teil dieses Blocks — `SetAnchor(null)` existiert im
+  Kern bereits, UI-Anbindung später.
+
+## 02.11.2026 (11. Arbeitsblock) — Namens-Konsistenz: `ResizeObject` → `ResizeBox`
+
+**Was:**
+
+- User-Fund bei der Code-Durchsicht: Der Resize-Request für Box-Objekte hieß
+  `ResizeObject`, obwohl er Circle ausschließt (stiller No-Op, per Test
+  gesichert) und nur Rectangle + Text bedient. Umbenannt zu `ResizeBox` —
+  analog `HandlePositions.ofBox`, das dieselbe Box-Familie (Rectangle +
+  Text-Box) bereits so nennt.
+- Rein mechanisch, 16 Code-Stellen in 7 Dateien: `ActionEvent` (Record +
+  Kommentar), `DiagramService` (`onResizeBox`), `UndoService` (3 Inversions-
+  Cases), `HandleDragState` (Commit) + 3 Test-Dateien (inkl.
+  `resizeBoxRequests`-Variable und DisplayName-Texte). AGENTS.md an 2 Stellen
+  mitgezogen (Ist-Zustand-Doku).
+- Begründungs-Kommentar am Record ergänzt: Zwei Resize-Familien nach
+  Geometrie (Box über Breite/Höhe, Circle über Radius), No-Op-Semantik bei
+  Typ-Missgriff bewusst und getestet.
+
+**Warum so:**
+
+- Der alte Name log: „Object" klingt universell, der Request gilt aber nur
+  für Box-Objekte — eine Einladung, ihn auf einen Circle zu publishen und
+  sich über den stillen No-Op zu wundern. `ResizeBox` sagt, was er tut.
+- Jetzt eingefroren: Noch ist keine UI da und das künftige JSON-Format hängt
+  nicht an Event-Namen — nach dem UI-Bau würde jede Umbenennung teurer
+  (dieselbe Argumentation wie beim „Applied"-Suffix-Streich 28.10.).
+- `ObjectResized`/`ResizedObject` (Fakt bzw. UndoOp) bleiben bewusst
+  typagnostisch — sie umfassen BEIDE Wege und tragen ihren Namen zu Recht.
+
+**Grenzen & Verbesserungskandidaten:**
+
+- `mvn test`: 155/155 grün — reines Refactoring ohne Verhaltensänderung.
+- Die DEVLOG-Chronik behält historische `ResizeObject`-Nennungen (Chronik
+  wird nicht umgeschrieben).
+
+## 01.11.2026 (10. Arbeitsblock) — Block 2: RouteEditMode, freie Fläche, Band-Vorschau, Hover-Glow
+
+**Was:**
+
+- **K/R-Erzeugung nur auf freier Fläche** (`PendingCreateOrPanState`): Klick
+  auf ein bestehendes Objekt ist ein stiller No-Op — kein deckungsgleicher
+  Stapel mehr, der `findTopmostAt` zur Lotterie macht. Ws blockieren nicht
+  (unsichtbar), dasselbe Filter-Muster wie im `ConnectingState`.
+- **RouteEditMode** (`RouteEditModeState`, neues): Klick NAHE einer
+  Verbindungskette (Toleranz 8 Bildschirm-px / Zoom) betritt den Modus;
+  `WaypointFocusChanged`-Hinweis blendet die W-Kreise ein und macht sie
+  greifbar — Klick exklusiv, Ctrl+Klick Toggle, Gummiband MIT Ws,
+  Multi-Move über die unveränderte `findMoveSet`/`MoveObjects`-Maschinerie.
+  Austritt: Klick daneben (Auswahl leeren), ESC (nicht-W-Auswahl behalten,
+  Ws werden aus der Auswahl gestreift), Klick auf K/R/Text (Idle-Semantik),
+  Toolbar-Wechsel. DEL löscht; lebt die fokussierte Verbindung nach der
+  Kaskade nicht mehr, endet der Modus mit ihr. Klick auf eine andere
+  Verbindung wechselt den Fokus.
+- **Idle filtert Ws aus Hit-Ergebnissen** (Latent-Makel-Fix): Der Kern
+  hit-testete Ws bedingungslos, obwohl ihre Sichtbarkeit UI-Sitzungszustand
+  ist — unsichtbare Ws waren heimliche Klick- UND Gummiband-Ziele. Jetzt:
+  Idle-Klick und Idle-Band filtern heraus, der RouteEditMode nicht.
+- **Gummiband-Vorschau** (`BoxSelectPreviewChanged`): Das Band war funktional
+  (Commit-on-Release), aber visuell NICHT vorhanden — der Javadoc-Kommentar
+  im `PendingBoxSelectState` behauptete aspirativ, „die UI zeichne lokal".
+  Korrigiert über das etablierte Hinweis-Muster: Der Kern publiziert das
+  Bildschirm-Rechteck pro Drag-Segment, die View zeichnet es im Root
+  (Screen-Raum, zoom-unabhängig) — KEINE Ctrl+Drag-Heuristik in der View
+  (das hätte Interaktionslogik dupliziert, demo2-Anti-Pattern).
+- **Hover-Glow auf Verbindungen** (demo2-Abstandsprüfer): Kein Objekt unter
+  der Maus → `findConnectionNear` (8 px/Zoom, existierende Query) → grauer
+  Glow auf dem Verbindungspfad, derselben Toleranz wie der Modus-Eintritt
+  (der Glow zeigt das Klick-Ziel).
+- **Gelbe Preview-Marker** beim Verbindungsaufbau: Die Kettenpunkte zeigen
+  schon während des Zusammenklickens als gelbe Kreise (demo2-Stil) — reine
+  Präsentation des `ConnectionPreviewChanged`-Hinweises; Modell-Fakten
+  werden die Ws weiterhin erst mit `CreateConnection` (kein
+  Abort-Kompensationsbedarf).
+- **Toolbar-Checkbox „Wegpunkte" entfernt**: Sichtbarkeit ist situatives
+  Feinschliff-Bedürfnis, kein Dauerzustand — jetzt Kern-geführt über den
+  Hinweis (User-Entscheidung; Vollselektierte Verbindungen wandern eh mit,
+  ohne dass ihre Ws in der Auswahl stehen).
+- `RouteEditModeTest` (15 Tests) + CircleCreationTest-Erweiterungen (3);
+  `WaypointSelectionMoveTest`/`BoxSelectionTest` auf die neue Semantik
+  umgestellt — **137 Tests, alle grün**.
+- **Bugfix aus dem visuellen Test (User-Fund):** Undo eines W-Löschens
+  zeigte das W wieder, aber die Verbindung lief nicht hindurch. Ursache:
+  Die LIFO-Disziplin des UndoService liefert `AddConnection(previous)`
+  VOR `RestoreObjects` — der erste View-Refresh leitete den Pfad ab, als
+  das W noch fehlte, und `GraphView.addObjectNode` refreshte danach keine
+  Connections (nur Move/Resize/Removed taten es). Fix: Refresh der
+  referenzierenden Connections beim Erscheinen eines Objekts — die View
+  konvergiert damit gegen beliebige Fakt-Reihenfolgen. Derselbe Gap machte
+  beim Undo einer Objekt-Löschung mit Kaskade die ganze Verbindung
+  unsichtbar (der erste Refresh entfernte den Node komplett, niemand baute
+  ihn wieder auf) — mitabgedeckt. Kern-Vertrag gesichert durch
+  `undoRestoresDeletedWaypointIntoConnection` (inkl. Redo) — **138 Tests**.
+- **Move-Snapping (Posten 6, nach Plan-Diskussion 1.11.):** Ziel des
+  primär gezogenen Objekts snappt auf den nächsten Grid-Schnittpunkt,
+  Gruppe folgt dem effektiven Delta (demo2-Semantik; Mathe in `GridSpec`,
+  Gesten-Semantik im `MovingState`, Service und View unberührt). Zwei
+  nicht offensichtliche Feinheiten: Die Snap-Rechnung läuft über die
+  MAUS-SUMME seit Gesten-Start (Segmentsicht klebte nach dem ersten Snap
+  für immer fest — jedes Segment sähe nur wenige Pixel über der alten
+  Position), und das effektive Delta wird gegen die bereits publizierten
+  eigenen Deltas verrechnet statt das Modell neu zu lesen (immun gegen
+  den Service-Skip verankerter Texte). Null-Delta-Segmente publizieren
+  nichts. User-Entscheidungen: Ws snappen uniform mit, Erzeugung bleibt
+  frei (spec). `SnapToGridTest` (6 Tests) — **144 Tests gesamt, grün**.
+- **Doppelklick-Einfügen von Kettenpunkten (Posten 7, Plan-Diskussion
+  1.11.):** `AddWaypoint` kehrt zurück (am 27.10. tot entfernt — die
+  AGENTS.md hatte die Rückkehr vorhergesagt). demo2-Semantik mit zwei
+  bewussten demo3-Verbesserungen: Das W-Record erzeugt der STATE nach dem
+  CreateConnection-Präzidenzfall (demo2: Factory im Handler), und der
+  Einfüge-Index aus der Kettengeometrie (nächstgelegenes Segment, Port von
+  demo2s GeometryUtils.calculateInsertionIndex) lebt im DiagramService —
+  testbar, demo2 trug ihn im State-Handler. Fakten: ObjectAdded +
+  ConnectionsUpdated (voller Vor-Zustand) — mechanisches Undo, und der
+  View-Konvergenz-Fix von oben trägt beide Reihenfolgen. KEINE
+  Auto-Selektion (User-Argument: Sichtbar = greifbar, Press selektiert
+  beim Greifen von selbst — demo2s Auto-Select war nur Feedback-Ersatz).
+  User-Pinning: Direktverbindungen K↔R ohne Ws sind ein expliziter
+  Testfall. Der Idle-Doppelklick auf eine Verbindung schenkt der
+  Event-Flow gratis: Press(1) betritt den Modus, Press(2) fügt ein.
+  RouteEditModeTest +8 — **152 Tests gesamt, grün**.
+- **Wählbarer Raster-Abstand (Posten 8, Plan-Diskussion 1.11.):** Toolbar-
+  Sektion „Snap to Grid" mit freiem numerischem Eingabefeld. `SetGridSize`
+  ist der zweite getrackte Sitzungswert nach der Kamera: Der BUS konsumiert
+  ihn selbst (Muster 3a/3b) und tauscht die GridSpec — Snap und Resize-
+  Mindestgröße folgen sofort, ohne dass ein Konsument angefasst wurde.
+  Validierung doppelt: Feld (Zahl > 0, Komma erlaubt, Rückstellung auf den
+  letzten gültigen Wert bei ENTER/Fokus-Verlust) und defensiv im Bus
+  (≤ 0/NaN/unendlich still ignoriert — sonst wäre ein Tippfehler ein
+  Crash über die werfende GridSpec-Konstruktion). User-Entscheidungen:
+  Startwert 20 (nur Main-Konstante — die Test-Fixture bleibt 10, ihre
+  Gesten sind darauf kalibriert), immer aktiv (spec: „virtuelles Netz",
+  kein Aus-Schalter trotz demo2-Checkbox), nicht persistiert, kein
+  sichtbares Raster (optionaler View-Posten später). SnapToGridTest +3 —
+  **155 Tests gesamt, grün**.
+- **Bugfix aus dem visuellen Test (User-Fund): Fokus-Falle am Grid-Feld.**
+  Nach dem Tippen im Snap-to-Grid-Feld blieben ESC/DEL/Shortcuts tot.
+  Ursache: Tastatur-Events gehen an den fokussierten Node, der
+  Übersetzer filtert aber auf der Zeichenfläche — und JavaFX-Regionen
+  übernehmen den Fokus beim Klick NICHT von selbst (setFocusTraversable
+  hilft nur gegen TAB; ein Textfeld nimmt den Fokus zum Tippen trotzdem).
+  Dreischichtiger Fix: (1) JEDER Klick auf die Fläche holt den Fokus
+  aktiv zurück (`InputEventTranslator.onMousePressed`), (2) ENTER committet
+  und gibt ihn per Main-Hook an die Zeichenfläche zurück, (3) ESC verwirft
+  die Eingabe (kein Commit), stellt das Feld zurück und gibt ihn ebenfalls
+  zurück. Der Hook hält die Toolbar entkoppelt (kennt die View nicht, ruft
+  nur den Callback). Kein Kern-Kontakt — 155 Tests unverändert grün.
+
+**Warum so:**
+
+- **Der Zustand IST das Flag:** Sichtbarkeit (UI) und Klick-Semantik (Kern)
+  für die Ws werden von DEMSELBEN Hinweis getragen, ohne gemeinsamen
+  Sitzungsspeicher — IdleToolState filtert Ws heraus, RouteEditModeState
+  nicht. Damit kann der Modus nicht aus dem Takt mit der View fallen (demo2:
+  Sichtbarkeits-Checkbox und Hit-Semantik waren zwei unabhängige Wahrheiten).
+- Das RouteEditMode-Design ist 1:1 das ResizeMode-Muster (Doppelklick →
+  Modus → Hinweis → Griffe/Ws → Klick daneben/ESC → raus): zwei Instanzen
+  desselben Musters statt zweier Mechanismen.
+- Move-Gruppe über `findMoveSet` blieb unangetastet: Ws kommen auf zwei
+  Wegen in die effektive Menge — im Idle implizit (vollselektierte
+  Verbindung), im Modus explizit als Basis-Mitglieder. Eine Funktion, keine
+  zweite Move-Logik (User-Entscheidung: „das Band nimmt nur Ks und Rs auf,
+  die Ws wandern mit").
+- Bildschirm-Pixel-Toleranz statt demo2s Welt-Toleranz: Bei Zoom-Out würde
+  ein Welt-Maß den Hotspot schrumpfen lassen, bei Zoom-In anschwellen.
+
+**Grenzen & Verbesserungskandidaten:**
+
+- Doppelklick auf eine Verbindung fügt noch KEINEN W ein (offener Rest aus
+  der spec; `AddWaypoint`-Request kehrt dort zurück) — der RouteEditMode ist
+  der natürliche Anker dafür.
+- Shortcuts K/R/C/T wirken in den langen Modi (Connecting/ResizeMode/
+  RouteEditMode) weiterhin nicht (bekanntes Restchen seit Block 1).
+- Band aus dem RouteEditMode selektiert Ws aller Verbindungen im Rechteck
+  (Sichtbarkeit ist global, nicht per Verbindung gefiltert) — konsistent,
+  aber bei dicht liegenden Routen ggf. fummelig; Beobachten im visuellen
+  Test.
+- View-z-Ordnung folgt weiter der Fakt-Reihenfolge (Restauration landet
+  oben) — Block-1-Restchen, unangetastet.
+
 ## 30.10.2026 (9. Arbeitsblock) — Resize: Option B + Fresh-Read-Fix + Live-Vorschau
 
 **Was:**

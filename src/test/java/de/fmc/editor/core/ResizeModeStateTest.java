@@ -11,6 +11,7 @@ import de.fmc.editor.core.model.DiagramObject;
 import de.fmc.editor.core.model.DiagramQuery;
 import de.fmc.editor.core.model.GridSpec;
 import de.fmc.editor.core.model.Rectangle;
+import de.fmc.editor.core.model.Text;
 import de.fmc.editor.core.service.SelectionService;
 import de.fmc.editor.core.state.CameraInfo;
 import de.fmc.editor.core.state.impl.HandleDragState;
@@ -40,7 +41,7 @@ class ResizeModeStateTest {
 
     private final List<ActionEvent.SetSelection> setSelectionRequests = new ArrayList<>();
     private final List<ActionEvent.ResizeCircle> resizeCircleRequests = new ArrayList<>();
-    private final List<ActionEvent.ResizeObject> resizeObjectRequests = new ArrayList<>();
+    private final List<ActionEvent.ResizeBox> resizeBoxRequests = new ArrayList<>();
     private final List<DiagramEvent.SelectionChanged> selectionFacts = new ArrayList<>();
 
     @BeforeEach
@@ -48,7 +49,7 @@ class ResizeModeStateTest {
         diagramObjects.clear();
         setSelectionRequests.clear();
         resizeCircleRequests.clear();
-        resizeObjectRequests.clear();
+        resizeBoxRequests.clear();
         selectionFacts.clear();
 
         // Dynamischer Stub: findet Objekte im Umkreis von 30 um ihr Zentrum
@@ -76,7 +77,7 @@ class ResizeModeStateTest {
 
         bus.subscribe(ActionEvent.SetSelection.class, setSelectionRequests::add);
         bus.subscribe(ActionEvent.ResizeCircle.class, resizeCircleRequests::add);
-        bus.subscribe(ActionEvent.ResizeObject.class, resizeObjectRequests::add);
+        bus.subscribe(ActionEvent.ResizeBox.class, resizeBoxRequests::add);
         bus.subscribe(DiagramEvent.SelectionChanged.class, selectionFacts::add);
     }
 
@@ -90,6 +91,13 @@ class ResizeModeStateTest {
         Rectangle rectangle = new Rectangle(UUID.randomUUID(), x, y, 40.0, 30.0, UUID.randomUUID());
         diagramObjects.add(rectangle);
         return rectangle;
+    }
+
+    private Text textAt(double x, double y) {
+        Text text = new Text(UUID.randomUUID(), "Notiz", x, y, 80.0, 40.0,
+                null, null, UUID.randomUUID());
+        diagramObjects.add(text);
+        return text;
     }
 
     private void enterResizeModeAt(double x, double y) {
@@ -143,10 +151,10 @@ class ResizeModeStateTest {
         bus.publish(new InputEvent.MouseDragged(190.0, 235.0, CustomMouseButton.PRIMARY));
         bus.publish(new InputEvent.MouseReleased(190.0, 235.0, CustomMouseButton.PRIMARY));
 
-        assertThat(resizeObjectRequests).hasSize(1);
-        assertThat(resizeObjectRequests.getFirst().id()).isEqualTo(rect.id());
-        assertThat(resizeObjectRequests.getFirst().newWidth()).isEqualTo(80.0);  // 2 * |190 - 150|
-        assertThat(resizeObjectRequests.getFirst().newHeight()).isEqualTo(70.0); // 2 * |235 - 200|
+        assertThat(resizeBoxRequests).hasSize(1);
+        assertThat(resizeBoxRequests.getFirst().id()).isEqualTo(rect.id());
+        assertThat(resizeBoxRequests.getFirst().newWidth()).isEqualTo(80.0);  // 2 * |190 - 150|
+        assertThat(resizeBoxRequests.getFirst().newHeight()).isEqualTo(70.0); // 2 * |235 - 200|
     }
 
     @Test
@@ -159,9 +167,9 @@ class ResizeModeStateTest {
         bus.publish(new InputEvent.MouseDragged(190.0, 300.0, CustomMouseButton.PRIMARY));
         bus.publish(new InputEvent.MouseReleased(190.0, 300.0, CustomMouseButton.PRIMARY));
 
-        assertThat(resizeObjectRequests).hasSize(1);
-        assertThat(resizeObjectRequests.getFirst().newWidth()).isEqualTo(80.0);
-        assertThat(resizeObjectRequests.getFirst().newHeight()).isEqualTo(30.0); // unverändert
+        assertThat(resizeBoxRequests).hasSize(1);
+        assertThat(resizeBoxRequests.getFirst().newWidth()).isEqualTo(80.0);
+        assertThat(resizeBoxRequests.getFirst().newHeight()).isEqualTo(30.0); // unverändert
     }
 
     @Test
@@ -205,5 +213,55 @@ class ResizeModeStateTest {
         assertThat(setSelectionRequests.getLast().selectedIds()).isEmpty();
         assertThat(selectionFacts).hasSize(2);
         assertThat(bus.getToolState()).isInstanceOf(IdleToolState.class);
+    }
+
+    // ---------- Text-Boxen (Stufe-B-Block, 02.11.) ----------
+
+    @Test
+    @DisplayName("Doppelklick auf ein Text-Objekt öffnet den Resize-Modus (8 Box-Griffe)")
+    void doubleClickOnTextOpensResizeMode() {
+        Text text = textAt(150.0, 200.0);
+
+        enterResizeModeAt(150.0, 200.0);
+
+        assertThat(setSelectionRequests).hasSize(1);
+        assertThat(setSelectionRequests.getFirst().selectedIds()).containsExactly(text.id());
+        assertThat(bus.getToolState()).isInstanceOf(ResizeModeState.class);
+    }
+
+    @Test
+    @DisplayName("Text-Eckengriff resizes die Box symmetrisch ums Zentrum — Commit erst beim Loslassen")
+    void textCornerHandleResizesBoxSymmetrically() {
+        Text text = textAt(150.0, 200.0); // SE-Griff bei (190, 220)
+        enterResizeModeAt(150.0, 200.0);
+
+        bus.publish(new InputEvent.MousePressed(190.0, 220.0, CustomMouseButton.PRIMARY, 1));
+        assertThat(bus.getToolState()).isInstanceOf(HandleDragState.class);
+
+        bus.publish(new InputEvent.MouseDragged(210.0, 240.0, CustomMouseButton.PRIMARY));
+        assertThat(resizeBoxRequests).isEmpty(); // Backend bleibt während des Drags stumm
+
+        bus.publish(new InputEvent.MouseReleased(210.0, 240.0, CustomMouseButton.PRIMARY));
+        assertThat(resizeBoxRequests).hasSize(1); // Genau EIN Commit pro Geste
+        assertThat(resizeBoxRequests.getFirst().id()).isEqualTo(text.id());
+        assertThat(resizeBoxRequests.getFirst().newWidth()).isEqualTo(120.0); // 2 * |210 - 150|
+        assertThat(resizeBoxRequests.getFirst().newHeight()).isEqualTo(80.0); // 2 * |240 - 200|
+        // Weiter im Resize-Modus: nächster Griff kann sofort gezogen werden
+        assertThat(bus.getToolState()).isInstanceOf(ResizeModeState.class);
+    }
+
+    @Test
+    @DisplayName("Text-Seitengriff ändert nur die eine Dimension")
+    void textEdgeHandleChangesOnlyOneDimension() {
+        textAt(150.0, 200.0); // E-Griff bei (190, 200)
+        enterResizeModeAt(150.0, 200.0);
+
+        bus.publish(new InputEvent.MousePressed(190.0, 200.0, CustomMouseButton.PRIMARY, 1));
+        bus.publish(new InputEvent.MouseDragged(210.0, 300.0, CustomMouseButton.PRIMARY));
+        bus.publish(new InputEvent.MouseReleased(210.0, 300.0, CustomMouseButton.PRIMARY));
+
+        assertThat(resizeBoxRequests).hasSize(1);
+        assertThat(resizeBoxRequests.getFirst().newWidth()).isEqualTo(120.0);
+        assertThat(resizeBoxRequests.getFirst().newHeight()).isEqualTo(40.0); // unverändert
     }
 }

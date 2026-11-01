@@ -96,12 +96,12 @@ class DiagramServiceTest {
     }
 
     @Test
-    @DisplayName("ResizeObject ändert die Maße und feuert den ObjectResized-Fakt")
+    @DisplayName("ResizeBox ändert die Maße und feuert den ObjectResized-Fakt")
     void shouldResizeRectangle() {
         Rectangle rect = new Rectangle(UUID.randomUUID(), 50.0, 60.0, 40.0, 30.0, defaultLayerId);
         bus.publish(new ActionEvent.AddElement(rect));
 
-        bus.publish(new ActionEvent.ResizeObject(rect.id(), 80.0, 50.0));
+        bus.publish(new ActionEvent.ResizeBox(rect.id(), 80.0, 50.0));
 
         assertThat(diagram.findById(rect.id()))
                 .hasValueSatisfying(obj -> {
@@ -164,15 +164,15 @@ class DiagramServiceTest {
     }
 
     @Test
-    @DisplayName("ResizeObject für ein Circle oder eine unbekannte ID bleibt ohne Fakt")
+    @DisplayName("ResizeBox für ein Circle oder eine unbekannte ID bleibt ohne Fakt")
     void shouldNotResizeCircleOrUnknownId() {
         Circle circle = newCircle(0.0, 0.0);
         bus.publish(new ActionEvent.AddElement(circle));
 
         // Resize auf einen Circle: nur Rectangles sind resizbar => kein Fakt
-        bus.publish(new ActionEvent.ResizeObject(circle.id(), 80.0, 50.0));
+        bus.publish(new ActionEvent.ResizeBox(circle.id(), 80.0, 50.0));
         // Resize auf eine unbekannte ID => kein Fakt
-        bus.publish(new ActionEvent.ResizeObject(UUID.randomUUID(), 80.0, 50.0));
+        bus.publish(new ActionEvent.ResizeBox(UUID.randomUUID(), 80.0, 50.0));
 
         assertThat(resizedFacts).isEmpty();
     }

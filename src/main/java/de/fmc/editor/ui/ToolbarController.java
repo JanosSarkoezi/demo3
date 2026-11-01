@@ -3,14 +3,12 @@ package de.fmc.editor.ui;
 import de.fmc.editor.core.bus.InteractionEventBus;
 import de.fmc.editor.core.event.ActionEvent;
 import de.fmc.editor.core.model.ToolType;
-import javafx.beans.property.BooleanProperty;
-import javafx.beans.property.SimpleBooleanProperty;
 import javafx.geometry.Insets;
 import javafx.scene.Node;
 import javafx.scene.control.Button;
-import javafx.scene.control.CheckBox;
 import javafx.scene.control.Label;
 import javafx.scene.control.Separator;
+import javafx.scene.control.TextField;
 import javafx.scene.control.ToggleButton;
 import javafx.scene.control.Tooltip;
 import javafx.scene.layout.VBox;
@@ -38,11 +36,19 @@ public final class ToolbarController {
     private final ToggleButton rectangleButton;
     private final ToggleButton connectButton;
     private final ToggleButton textButton;
-    /** Sichtbarkeit des Wegpunkt-Layers — reine UI-Sache, geht nie auf den Bus. */
-    private final BooleanProperty waypointsVisible = new SimpleBooleanProperty(false);
+    /** Zuletzt gültiger Raster-Abstand — Rückstellziel bei ungültiger Eingabe. */
+    private double lastValidGridSize;
+    /** Gibt den Tastatur-Fokus an die Zeichenfläche zurück (Hook von Main —
+     *  die Toolbar kennt die View nicht). Nötig nach jedem Feld-Commit:
+     *  Ein Textfeld muss den Fokus zum Tippen nehmen und gibt ihn ohne
+     *  dies nie zurück — Shortcuts lebten dann nur noch im Feld. */
+    private final Runnable returnFocusToCanvas;
 
-    public ToolbarController(final InteractionEventBus bus) {
+    public ToolbarController(final InteractionEventBus bus, final double initialGridSize,
+                             final Runnable returnFocusToCanvas) {
         this.bus = bus;
+        this.lastValidGridSize = initialGridSize;
+        this.returnFocusToCanvas = returnFocusToCanvas;
 
         circleButton = createToolButton("Kreis", "Kreis zeichnen (K)", ToolType.CIRCLE,
                 new Circle(8.0));
@@ -99,19 +105,75 @@ public final class ToolbarController {
                 createActionButton("Undo", () -> bus.publish(new ActionEvent.RequestUndo())),
                 createActionButton("Redo", () -> bus.publish(new ActionEvent.RequestRedo())));
 
-        // --- Settings ---
+        // Die Wegpunkte-Sichtbarkeit ist mit Block 2 zum Kernerfolg geworden:
+        // Klick auf die Verbindung (Hover-Glow zeigt den Hotspot) betritt den
+        // RouteEditMode und blendet die Ws über WaypointFocusChanged ein —
+        // eine dauerhafte Checkbox wäre ein Werkzeug für einen Dauerzustand,
+        // das Anfassen ist aber situativ.
+
+        // --- Snap to Grid (freier Abstand, immer aktiv — spec: „virtuelles
+        //     Netz"; kein Aus-Schalter, keine Persistenz: User-Entscheidung
+        //     1.11.). Reiner Publisher: ENTER/Fokus-Verlust committet. ---
         bar.getChildren().add(sectionSeparator());
-        bar.getChildren().add(sectionLabel("Settings"));
-        bar.getChildren().add(createWaypointsCheckBox());
+        bar.getChildren().add(sectionLabel("Snap to Grid"));
+        bar.getChildren().add(createGridSizeField());
 
         return bar;
     }
 
-    /**
-     * Zustand der Wegpunkte-Sichtbarkeit für die View-Anbindung.
-     */
-    public BooleanProperty waypointsVisibleProperty() {
-        return waypointsVisible;
+    /** Freies numerisches Eingabefeld für den Raster-Abstand. Validierung:
+     *  Zahl > 0 (Komma statt Punkt ist erlaubt); ungültige Eingaben werden
+     *  still verworfen und das Feld auf den letzten gültigen Wert gestellt.
+     *  Der Bus validiert defensiv erneut (Beliebige Quelle könnte senden). */
+    private TextField createGridSizeField() {
+        final TextField field = new TextField();
+        field.setText(String.valueOf(lastValidGridSize));
+        field.getStyleClass().add("grid-field");
+        field.setMaxWidth(Double.MAX_VALUE);
+        field.setFocusTraversable(false); // Fokus bleibt auf der Zeichenfläche
+        field.setTooltip(new Tooltip(
+                "Grid-Abstand in Welt-Einheiten — Objekte kleben beim Verschieben "
+                        + "an den Kreuzungspunkten (ENTER übernimmt)."));
+
+        final Runnable commit = () -> {
+            try {
+                final double value = Double.parseDouble(
+                        field.getText().trim().replace(',', '.'));
+                if (Double.isFinite(value) && value > 0.0) {
+                    lastValidGridSize = value;
+                    bus.publish(new ActionEvent.SetGridSize(value));
+                }
+            } catch (final NumberFormatException invalid) {
+                // Still verwerfen — das Raster bleibt, das Feld stellt zurück.
+            }
+            field.setText(String.valueOf(lastValidGridSize));
+        };
+
+        // ENTER: Commit + Fokus zurück auf die Zeichenfläche — die Editier-
+        // Episode ist beendet, Shortcuts (ESC, DEL, K/R/C/T) leben wieder dort.
+        field.setOnAction(event -> {
+            commit.run();
+            returnFocusToCanvas.run();
+        });
+
+        // ESC im Feld: Eingabe VERWERFEN (kein Commit, kein Publish), Feld
+        // auf den gültigen Wert zurückstellen, Fokus zurückgeben. Die ESC-
+        // Semantik der Zeichenfläche (Moden/Gesten abbrechen) greift danach
+        // wieder — sie war nie gemeint, während im Feld getippt wird.
+        field.addEventFilter(javafx.scene.input.KeyEvent.KEY_PRESSED, key -> {
+            if (key.getCode() == javafx.scene.input.KeyCode.ESCAPE) {
+                field.setText(String.valueOf(lastValidGridSize));
+                key.consume();
+                returnFocusToCanvas.run();
+            }
+        });
+
+        field.focusedProperty().addListener((obs, was, focused) -> {
+            if (!focused) {
+                commit.run(); // Fokus-Verlust committet ebenfalls
+            }
+        });
+        return field;
     }
 
     private Label sectionLabel(final String text) {
@@ -174,16 +236,6 @@ public final class ToolbarController {
         button.setFocusTraversable(false); // Fokus bleibt auf der Zeichenfläche
         button.setOnAction(event -> action.run());
         return button;
-    }
-
-    private CheckBox createWaypointsCheckBox() {
-        // Default unselektiert — Wegpunkte-Layer startet unsichtbar.
-        final CheckBox checkBox = new CheckBox("Wegpunkte");
-        checkBox.setSelected(false);
-        checkBox.getStyleClass().add("settings-checkbox");
-        checkBox.setFocusTraversable(false); // Fokus bleibt auf der Zeichenfläche
-        checkBox.selectedProperty().bindBidirectional(waypointsVisible);
-        return checkBox;
     }
 
     // --- demo2-Icon-Graphics (1:1 aus toolbar-view.fxml portiert) ---

@@ -18,6 +18,17 @@ public sealed interface ActionEvent extends DomainEvent {
     record ZoomView(double zoomFactor, double pivotX, double pivotY) implements ActionEvent {
     }
 
+    /** Neue Rasterweite für das Move-Snapping (Toolbar-Eingabe „Snap to
+     *  Grid"). Konsumiert der BUS SELBST wie PanView/ZoomView — die GridSpec
+     *  ist ein getrackter Sitzungswert: Jeder Folge-Event rechnet mit dem
+     *  neuen Raster (Snap, Resize-Mindestgröße = 1 Zelle). Validierung im
+     *  Bus: Werte <= 0, NaN oder unendlich werden still ignoriert, das
+     *  Raster bleibt. Bewusst NICHT persistiert (User-Entscheidung 1.11.:
+     *  schnell einstellbar) und immer AKTIV (spec: „virtuelles Netz kleben
+     *  lassen" — kein Aus-Schalter). */
+    record SetGridSize(double gridSize) implements ActionEvent {
+    }
+
     // Anfrage der Tool-Machine an die Camera-Machine, das Panning zu übernehmen.
     // button = die Taste, die die Geste gestartet hat — nur ihr Loslassen
     // beendet das Panning (siehe CameraPanningState).
@@ -40,8 +51,10 @@ public sealed interface ActionEvent extends DomainEvent {
     record AddElement(DiagramObject object) implements ActionEvent {
     }
 
-    // Zentrales Löschen inkl. Kaskade (Connections und deren Waypoints);
-    // alle Entfernungen erscheinen als Batch-Fakten (ObjectsRemoved,
+    // Zentrales Löschen inkl. Kaskade: IDs können Objekte ODER (seit 03.11.)
+    // Verbindungen sein — eine Connection-ID entfernt die Verbindung samt
+    // ihrer Waypoints und verankerten Labels, die Endpunkte bleiben. Alle
+    // Entfernungen erscheinen als Batch-Fakten (ObjectsRemoved,
     // ConnectionsRemoved) mit vollständigem Zustand — Undo-Grundlage.
     record DeleteObjects(List<UUID> ids) implements ActionEvent {
     }
@@ -65,7 +78,11 @@ public sealed interface ActionEvent extends DomainEvent {
 
     // Resize-Requests tragen NUR Maße, niemals Positionen: das Zentrum bleibt
     // damit garantiert erhalten (symmetrisches Resize um den Ankerpunkt).
-    record ResizeObject(UUID id, double newWidth, double newHeight) implements ActionEvent {
+    // Zwei Familien nach Geometrie: Box-Objekte (Rectangle, Text) über
+    // Breite/Höhe, der Circle kennt nur einen Radius. ResizeBox auf ein
+    // Nicht-Box-Objekt (insb. Circle) ist bewusst ein stiller No-Op —
+    // analog ResizeCircle auf ein Nicht-Circle.
+    record ResizeBox(UUID id, double newWidth, double newHeight) implements ActionEvent {
     }
 
     record ResizeCircle(UUID id, double newRadius) implements ActionEvent {
@@ -82,6 +99,17 @@ public sealed interface ActionEvent extends DomainEvent {
 
     /** Entfernt NUR die genannten Connections — ohne Waypoint-Kaskade (präzises Inverse). */
     record RemoveConnections(List<UUID> ids) implements ActionEvent {
+    }
+
+    /** Fügt einen Kettenpunkt in eine bestehende Verbindung ein (Doppelklick
+     *  auf ein Segment im RouteEditMode; demo2-Semantik). Das W-Record
+     *  erzeugt der STATE mit frischer UUID — Präzedenzfall CreateConnection;
+     *  der Einfüge-Index wird aus der Kettengeometrie abgeleitet und liegt
+     *  deshalb im DiagramService (demo2 trug ihn noch im State-Handler).
+     *  Fakten: ObjectAdded (das W) + ConnectionsUpdated (voller Vor-Zustand).
+     *  Kehrt am 1.11. zurück: Am 27.10 ohne Konsumenten entfernt (tot),
+     *  jetzt mit echtem Anwendungsfall. */
+    record AddWaypoint(UUID connectionId, Waypoint waypoint) implements ActionEvent {
     }
 
     // --- Text: Innere Texte (Felder auf K/R) und Text-Objekte ---
@@ -111,11 +139,14 @@ public sealed interface ActionEvent extends DomainEvent {
     }
 
     // --- UI-Intents für den Inline-Editor ---
-    // NOCH OHNE Service-Konsument: Der DiagramService ignoriert sie still.
-    // Die spätere UI abonniert sie, öffnet den Editor an der letzten
-    // Klick-Position (behält sie selbst) und publiziert beim Commit die
-    // passenden Requests von oben (SetCircleLabel, AddAnchoredText, ...).
-    // ESC im Editor verbraucht die UI selbst — erreicht den Core nie.
+    // Der DiagramService ignoriert sie still; Konsument ist die UI. Seit
+    // 02.11. (Stufe A) abonniert der InlineTextEditorController
+    // CreateTextFor, EditTextOfObject (Kreis) und EditText: Er öffnet den
+    // Editor an der Klick-Position (behält sie selbst) und publiziert beim
+    // Commit die passenden Requests von oben (AddElement, SetCircleLabel,
+    // UpdateText). CreateConnectionText (Stufe C) und EditTextOfObject auf
+    // ein Rechteck (Stufe B) warten noch auf ihren Zweig. ESC im Editor
+    // verbraucht die UI selbst — erreicht den Core nie.
 
     /** Editor-Intent: Inneren Text dieses K/R bearbeiten. */
     record EditTextOfObject(UUID objectId) implements ActionEvent {
@@ -173,7 +204,27 @@ public sealed interface ActionEvent extends DomainEvent {
      *  preview == null: Vorschau-Ende (Commit oder Abbruch) — die View stellt
      *  die Geometrie dann aus dem Modell her (beim Abbruch kommt KEIN Fakt).
      *  Sitzungszustand, KEIN Modell-Fakt, kein Undo-Punkt. Der Commit bleibt
-     *  genau EIN ResizeObject/ResizeCircle beim Loslassen. */
+     *  genau EIN ResizeBox/ResizeCircle beim Loslassen. */
     record ResizePreviewChanged(DiagramObject preview) implements ActionEvent {
+    }
+
+    /** Hinweis: RouteEditMode für genau diese Verbindung betreten (Klick auf
+     *  die Verbindungskette im Auswahl-Werkzeug; die UI blendet die W-Kreise
+     *  ein und macht sie damit greifbar). connectionId == null: Modus
+     *  verlassen (Klick daneben/auf ein Objekt, ESC, Toolbar-Wechsel) — die
+     *  W-Kreise verschwinden. Sitzungszustand, KEIN Modell-Fakt; die
+     *  Klick-Semantik der Ws trägt der RouteEditModeState selbst — der
+     *  Zustand IST das Flag, kein gemeinsamer Sitzungsspeicher nötig. */
+    record WaypointFocusChanged(UUID connectionId) implements ActionEvent {
+    }
+
+    /** Hinweis: Live-Vorschau einer laufenden Gummiband-Geste — das
+     *  Bildschirm-Rechteck (Start ≠ Ende), das die UI lokal zeichnet.
+     *  startX == null: Band-Ende (Commit oder Abbruch). Bildschirm-
+     *  Koordinaten bewusst: Das Band ist reine Präsentation der Geste,
+     *  die Treffer-Rechnung läuft separat beim Loslassen über die Kamera
+     *  in Welt-Koordinaten. Sitzungszustand, KEIN Modell-Fakt. */
+    record BoxSelectPreviewChanged(Double startX, Double startY,
+                                   Double currentX, Double currentY) implements ActionEvent {
     }
 }

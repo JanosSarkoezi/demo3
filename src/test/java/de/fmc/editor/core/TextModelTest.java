@@ -118,8 +118,8 @@ class TextModelTest {
     // ---------- Verankerte Texte ----------
 
     @Test
-    @DisplayName("AddAnchoredText leitet x/y aus dem Anker ab; verankerte Texte sind nicht delta-verschiebbar")
-    void anchoredTextDerivesPositionAndSkipsDeltaMoves() {
+    @DisplayName("AddAnchoredText leitet x/y aus dem Anker ab; MoveObjectTo (mechanisch) bleibt Skip")
+    void anchoredTextDerivesPositionAndMoveObjectToStaysSkip() {
         Circle source = addCircle(100.0, 100.0);
         Rectangle target = addRectangle(400.0, 100.0);
         Connection connection = connect(source, target);
@@ -137,10 +137,15 @@ class TextModelTest {
         assertThat(added.x()).isEqualTo(260.0);
         assertThat(added.y()).isEqualTo(105.0);
 
+        // Mechanischer Restore-Pfad (Undo-Inverse): Verankerte Positionen
+        // stellen sich über die Ableitung aus der Kette her, nie über
+        // direkte Writes — MoveObjectTo ist bewusst ein stiller No-Op.
+        // Der Gesten-Pfad (MoveObjects) re-ankert: TextGlidingTest deckt das ab.
         movedBatchFacts.clear();
-        eventBus.publish(new ActionEvent.MoveObjects(List.of(added.id()), 50.0, 0.0));
-        assertThat(movedBatchFacts).isEmpty(); // verankert => still übersprungen
+        eventBus.publish(new ActionEvent.MoveObjectTo(added.id(), 999.0, 999.0));
+        assertThat(movedBatchFacts).isEmpty();
         assertThat(textById(added.id()).x()).isEqualTo(260.0);
+        assertThat(textById(added.id()).y()).isEqualTo(105.0);
     }
 
     @Test
@@ -190,7 +195,7 @@ class TextModelTest {
     }
 
     @Test
-    @DisplayName("Wird ein Abschnitt-Waypoint entfernt, klemmt der Anker-Index auf den letzten Abschnitt")
+    @DisplayName("Wird ein Abschnitt-Waypoint entfernt, klemmt der Anker — die Position leitet per Gleiten automatisch ab")
     void anchorIndexClampsWhenWaypointIsDeleted() {
         Circle source = addCircle(100.0, 100.0);
         Rectangle target = addRectangle(400.0, 100.0);
@@ -210,12 +215,16 @@ class TextModelTest {
         assertThat(textById(textId).x()).isEqualTo(325.0);
         gestureBoundary();
 
-        // Waypoint löschen: Kette schrumpft auf EINEN Abschnitt => Index klemmt
-        // auf 0, t = 0.5 bleibt => (250, 100)
+        // Waypoint löschen: Kette schrumpft auf EINEN Abschnitt => Index
+        // klemmt auf 0, t = 0.5 bleibt => (250, 100) — per W-Gleiten als
+        // SICHTBARES ObjectsMoved im selben Lösch-Durchlauf, der Anker
+        // bleibt als Absicht unverändert.
+        movedBatchFacts.clear();
         eventBus.publish(new ActionEvent.DeleteObjects(List.of(waypoint.id())));
-        eventBus.publish(new ActionEvent.SetAnchor(textId, textById(textId).anchor()));
         assertThat(textById(textId).x()).isEqualTo(250.0);
         assertThat(textById(textId).y()).isEqualTo(100.0);
+        assertThat(textById(textId).anchor()).isEqualTo(new TextAnchor(1, 0.5, 0.0, 0.0));
+        assertThat(movedBatchFacts).hasSize(1);
     }
 
     // ---------- Mitwandern & Kaskade ----------

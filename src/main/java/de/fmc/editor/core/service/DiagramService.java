@@ -14,11 +14,14 @@ import de.fmc.editor.core.model.Waypoint;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -68,7 +71,7 @@ public class DiagramService implements DiagramQuery {
         this.bus = bus;
         bus.subscribe(ActionEvent.AddElement.class, this::onAddElement);
         bus.subscribe(ActionEvent.MoveObject.class, this::onMoveObject);
-        bus.subscribe(ActionEvent.ResizeObject.class, this::onResizeObject);
+        bus.subscribe(ActionEvent.ResizeBox.class, this::onResizeBox);
         bus.subscribe(ActionEvent.ResizeCircle.class, this::onResizeCircle);
         bus.subscribe(ActionEvent.CreateConnection.class, this::onCreateConnection);
         bus.subscribe(ActionEvent.DeleteObjects.class, this::onDeleteObjects);
@@ -77,6 +80,7 @@ public class DiagramService implements DiagramQuery {
         bus.subscribe(ActionEvent.MoveObjects.class, this::onMoveObjects);
         bus.subscribe(ActionEvent.AddConnection.class, this::onAddConnection);
         bus.subscribe(ActionEvent.RemoveConnections.class, this::onRemoveConnections);
+        bus.subscribe(ActionEvent.AddWaypoint.class, this::onAddWaypoint);
         bus.subscribe(ActionEvent.SetCircleLabel.class, this::onSetCircleLabel);
         bus.subscribe(ActionEvent.SetRectangleContent.class, this::onSetRectangleContent);
         bus.subscribe(ActionEvent.UpdateText.class, this::onUpdateText);
@@ -104,7 +108,15 @@ public class DiagramService implements DiagramQuery {
         if (current == null) {
             return; // Unbekannte ID still ignorieren — kein Crash
         }
+        if (isAnchored(current)) {
+            // Delta-Move auf einen verankerten Text = Re-Ankerung (Drag-Geste):
+            // Die Zielposition wird auf die Kette projiziert und schreibt die
+            // Platzierungs-Absicht (t + Offset) neu — nie absolute Pixel.
+            reanchorAt((Text) current, current.x() + event.deltaX(), current.y() + event.deltaY());
+            return;
+        }
         applyMove(current, current.x() + event.deltaX(), current.y() + event.deltaY());
+        publishGlide(List.of(event.id()));
     }
 
     /** Absolute Zielposition — das präzise Inverse für Undo (kein Float-Drift). */
@@ -114,32 +126,59 @@ public class DiagramService implements DiagramQuery {
             return;
         }
         applyMove(current, event.x(), event.y());
+        // Auch die mechanische Restore-Position (Undo-Inverse) verformt die
+        // Kette: Das Gleiten hier ist der Pfad, auf dem Undo verankerte Texte
+        // aus der per LIFO wiederhergestellten Geometrie ableitet.
+        publishGlide(List.of(event.id()));
     }
 
-    /** Gruppenverschiebung: EIN Batch-Fakt pro Segment, egal wie viele Objekte. */
+    /**
+     * Gruppenverschiebung: EIN Batch-Fakt pro Segment, egal wie viele Objekte.
+     * Verankerte Texte in der ID-Liste werden RE-ANKERT (Drag-Geste: der Drag
+     * schreibt die Anker-Absicht neu, publiziert als ObjectTextChanged — das
+     * Undo-Merge macht die ganze Geste zu EINEM Undo-Punkt). Alle verankerten
+     * Texte BERÜHRTER Verbindungen gleiten als sichtbare Einträge im selben
+     * Batch-Fakt mit (W-Gleiten — keine versteckte Kaskade, demo2-Lektion).
+     */
     private void onMoveObjects(ActionEvent.MoveObjects event) {
         List<DiagramEvent.ObjectMoved> applied = new ArrayList<>();
+        List<UUID> chainMovedIds = new ArrayList<>();
         for (UUID id : event.ids()) {
             DiagramObject current = objects.get(id);
-            if (current == null || isAnchored(current)) {
-                continue; // Unbekannte ID still ignorieren; verankerte Texte
-                          // bewegen sich NUR durch Re-Ankerung (SetAnchor),
-                          // ihre Position ist abgeleitet.
+            if (current == null) {
+                continue; // Unbekannte ID still ignorieren — kein Crash
+            }
+            if (isAnchored(current)) {
+                reanchorAt((Text) current, current.x() + event.deltaX(), current.y() + event.deltaY());
+                continue;
             }
             double oldX = current.x();
             double oldY = current.y();
             DiagramObject moved = moved(current, event.deltaX(), event.deltaY());
             objects.put(id, moved);
             applied.add(new DiagramEvent.ObjectMoved(id, oldX, oldY, moved.x(), moved.y()));
+            chainMovedIds.add(id);
         }
+        // W-Gleiten hinter den Ketten-Objekten im SELBEN Batch: Undo replayt
+        // rückwärts — das Label-Inverse (MoveObjectTo) ist ein stiller No-Op,
+        // die Kette stellt die Label-Position per Ableitung wieder her.
+        applied.addAll(deriveAnchoredTexts(connectionsTouchingIds(chainMovedIds)));
         if (!applied.isEmpty()) {
             publishFact(new DiagramEvent.ObjectsMoved(List.copyOf(applied)));
         }
     }
 
+    /**
+     * Bewegung zu einer absoluten Position. Verankerte Texte bleiben hier
+     * bewusst SKIPS: MoveObjectTo ist der mechanische Restore-Pfad (Undo),
+     * und verankerte Positionen stellen sich über die Ableitung aus der per
+     * LIFO wiederhergestellten Geometrie her — nicht über direkte Writes.
+     * (Der Gesten-Pfad MoveObjects/MoveObject re-ankert dagegen — siehe
+     * reanchorAt.)
+     */
     private void applyMove(DiagramObject current, double targetX, double targetY) {
         if (isAnchored(current)) {
-            return; // Verankerte Texte sind nicht delta-verschiebbar.
+            return; // Verankerte Texte: Position nur über Re-Ankerung/Ableitung.
         }
         double oldX = current.x();
         double oldY = current.y();
@@ -148,12 +187,13 @@ public class DiagramService implements DiagramQuery {
         publishFact(new DiagramEvent.ObjectMoved(moved.id(), oldX, oldY, moved.x(), moved.y()));
     }
 
-    /** Verankerte Texte sind abgeleitete Positionen — nie direkte Move-Ziele. */
+    /** Verankerte Texte: Position ist abgeleitet — Gesten-Moves re-ankern sie,
+     *  mechanische Restore-Moves (MoveObjectTo) überspringen sie still. */
     private boolean isAnchored(DiagramObject obj) {
         return obj instanceof Text text && text.anchor() != null;
     }
 
-    private void onResizeObject(ActionEvent.ResizeObject event) {
+    private void onResizeBox(ActionEvent.ResizeBox event) {
         DiagramObject current = objects.get(event.id());
         DiagramObject resized = null;
         if (current instanceof Rectangle rectangle) {
@@ -229,10 +269,18 @@ public class DiagramService implements DiagramQuery {
     private void onDeleteObjects(ActionEvent.DeleteObjects event) {
         // Phase 1 — Sammeln OHNE Mutation: alle betroffenen Objekte
         // (Primär-IDs + kaskadierte Waypoints) und Connections bestimmen.
-        // putIfAbsent hält Geteilte (Waypoints mehrerer Connections) genau einmal.
+        // Connection-IDs (seit 03.11. selektierbar) lösen dieselbe Kaskade
+        // aus wie das Löschen ihrer Endpunkte — nur bleiben dabei die
+        // Endpunkte selbst am Leben. putIfAbsent hält Geteilte (Waypoints
+        // mehrerer Connections) genau einmal.
         LinkedHashMap<UUID, DiagramObject> doomedObjects = new LinkedHashMap<>();
         LinkedHashMap<UUID, Connection> doomedConnections = new LinkedHashMap<>();
         for (UUID id : event.ids()) {
+            Connection connection = connections.get(id);
+            if (connection != null) {
+                collectConnectionCascade(connection, doomedObjects, doomedConnections);
+                continue;
+            }
             DiagramObject obj = objects.get(id);
             if (obj == null) {
                 continue; // Unbekannte ID still ignorieren — kein Crash
@@ -256,7 +304,7 @@ public class DiagramService implements DiagramQuery {
                 doomedObjects.putIfAbsent(text.id(), text);
             }
         }
-        if (doomedObjects.isEmpty()) {
+        if (doomedObjects.isEmpty() && doomedConnections.isEmpty()) {
             return;
         }
 
@@ -296,10 +344,18 @@ public class DiagramService implements DiagramQuery {
         }
 
         // Phase 5 — Fakten (vollständiger Zustand inkl. z-Indizes = Undo-Grundlage).
-        publishFact(new DiagramEvent.ObjectsRemoved(removedObjects, zIndices));
+        // ObjectsRemoved nur bei tatsächlichen Objekt-Entfernungen: Eine
+        // Direktverbindung ohne Ws löst keine Objekt-Kaskade aus.
+        if (!removedObjects.isEmpty()) {
+            publishFact(new DiagramEvent.ObjectsRemoved(removedObjects, zIndices));
+        }
         if (!updatedAfter.isEmpty()) {
             publishFact(new DiagramEvent.ConnectionsUpdated(
                     List.copyOf(updatedPrevious.values()), List.copyOf(updatedAfter.values())));
+            // W-Gleiten: Die überlebende Verbindung hat Kettenpunkte verloren —
+            // ihre verankerten Texte leiten neu ab (der Index klemmt in
+            // anchoredCenter; der Anker bleibt als Absicht unverändert).
+            publishGlideForConnections(updatedAfter.keySet());
         }
         if (!doomedConnections.isEmpty()) {
             publishFact(new DiagramEvent.ConnectionsRemoved(List.copyOf(doomedConnections.values())));
@@ -344,12 +400,80 @@ public class DiagramService implements DiagramQuery {
             objects.put(obj.id(), obj);
             publishFact(new DiagramEvent.ObjectAdded(obj));
         }
+        // W-Gleiten nach der Wiederherstellung: Die Kette kann wieder
+        // vollständig sein — verankerte Texte leiten aus der per LIFO
+        // hergestellten Geometrie ab (Undo des W-Löschens konvergiert hier).
+        publishGlide(event.objects().stream().map(DiagramObject::id).toList());
     }
 
     /** Stellt eine Connection mit ihrer ORIGINAL-ID wieder her (Undo des Löschens). */
     private void onAddConnection(ActionEvent.AddConnection event) {
         connections.put(event.connection().id(), event.connection());
         publishFact(new DiagramEvent.ConnectionEstablished(event.connection()));
+        // W-Gleiten: Auch das Wiederherstellen einer (ggf. gekürzten)
+        // Connection ist eine Ketten-Verformung — das Undo des W-Löschens
+        // leitet die Label-Position hieraus ab, lange bevor die W-Objekte
+        // selbst zurückkehren (polyPoints überspringt Fehlende tolerant).
+        publishGlideForConnections(List.of(event.connection().id()));
+    }
+
+    /**
+     * Fügt einen Kettenpunkt in eine bestehende Verbindung ein (Doppelklick
+     * auf ein Segment im RouteEditMode). Der Einfüge-Index wird hier aus der
+     * Kettengeometrie abgeleitet (nächstgelegenes Segment) — die Logik
+     * gehört in den Kern und ist testbar; demo2 trug sie noch im State-Handler.
+     * Fakten in der etablierten Reihenfolge: erst das Objekt, dann die
+     * Connection mit vollständigem Vor-Zustand (Undo-Regel) — mechanisches
+     * Undo: DeleteObjects + AddConnection(previous), ein Punkt pro Geste.
+     *
+     * W-Gleiten: Der neue Kettenpunkt teilt den Einfüge-Abschnitt in zwei —
+     * Anker auf dahinterliegenden Abschnitten wandern um eins mit
+     * (ObjectTextChanged, Position bleibt: ihre Geometrie ist unverändert),
+     * Anker auf dem geteilten Abschnitt gleiten auf die erste Hälfte
+     * (ObjectsMoved, Anker bleibt als Absicht erhalten).
+     */
+    private void onAddWaypoint(ActionEvent.AddWaypoint event) {
+        Connection conn = connections.get(event.connectionId());
+        if (conn == null) {
+            return; // Unbekannte Verbindung still ignorieren — kein Crash
+        }
+
+        Waypoint waypoint = event.waypoint();
+        List<UUID> newIds = new ArrayList<>(conn.waypointIds());
+        int insertAt = Math.min(insertionIndex(conn, waypoint.x(), waypoint.y()), newIds.size());
+        newIds.add(insertAt, waypoint.id());
+
+        Connection updated = new Connection(conn.id(), conn.sourceId(),
+                conn.targetId(), List.copyOf(newIds), conn.layerId());
+        connections.put(conn.id(), updated);
+
+        addToModel(waypoint);
+        publishFact(new DiagramEvent.ObjectAdded(waypoint));
+        publishFact(new DiagramEvent.ConnectionsUpdated(
+                List.of(conn), List.of(updated)));
+        shiftAnchorsBeyond(conn.id(), insertAt);
+        publishGlideForConnections(List.of(conn.id()));
+    }
+
+    /**
+     * Einfüge-Index für einen neuen Kettenpunkt: Nummer des der Klick-Position
+     * nächstgelegenen Segments (Kette Quelle → Ws → Ziel). Segment 0 liegt
+     * zwischen Quelle und dem ersten W → Index 0; das letzte Segment →
+     * Index n = anhängen (demo2: GeometryUtils.calculateInsertionIndex).
+     */
+    private int insertionIndex(Connection conn, double worldX, double worldY) {
+        List<double[]> points = polyPoints(conn);
+        int best = 0;
+        double bestDistance = Double.MAX_VALUE;
+        for (int i = 0; i + 1 < points.size(); i++) {
+            double distance = pointSegmentDistance(worldX, worldY,
+                    points.get(i), points.get(i + 1));
+            if (distance < bestDistance) {
+                bestDistance = distance;
+                best = i;
+            }
+        }
+        return best;
     }
 
     /** Entfernt NUR die genannten Connections — ohne Waypoint-Kaskade (präzises Inverse). */
@@ -436,9 +560,12 @@ public class DiagramService implements DiagramQuery {
 
     @Override
     public Optional<DiagramObject> findTopmostAt(double worldX, double worldY) {
-        // zOrder rückwärts = oberstes Objekt zuerst. Waypoints sind volle
-        // Klick-Ziele (Routenpunkte zum Umformen der Route); der
-        // Verbindungsaufbau filtert sie selbst heraus (siehe ConnectingState).
+        // zOrder rückwärts = oberstes Objekt zuerst. Waypoints liefert die
+        // Query bewusst MIT: Der RouteEditMode greift sie direkt. Alle anderen
+        // Konsumenten (IdleToolState, PendingCreateOrPanState, ConnectingState)
+        // filtern sie selbst heraus — unsichtbare Objekte sind dort keine
+        // Klick-Ziele. Die Query bleibt allgemein, die Semantik liegt in den
+        // States (der Zustand IST das Flag).
         for (int i = zOrder.size() - 1; i >= 0; i--) {
             DiagramObject obj = objects.get(zOrder.get(i));
             if (obj == null) {
@@ -498,13 +625,26 @@ public class DiagramService implements DiagramQuery {
      * externen Label (wandern mit ihrem Owner) und die Waypoints
      * VOLLSELEKTierter Verbindungen (beide Endpunkte in der Basis) — die
      * Route gehört zur Verbindung und wandert als Ganzes mit. Teilselektierte
-     * Verbindungen bleiben verankert. Verankerte Texte filtert onMoveObjects
-     * still heraus (ihre Position ist abgeleitet).
+     * Verbindungen bleiben verankert. Verankerte Texte als DRAG-BASIS
+     * re-ankert der Service (Drag schreibt die Absicht neu); als Mitnehmer
+     * bei Ketten-Bewegungen leitet er sie per W-Gleiten ab.
+     *
+     * Connection-IDs in der Basis tragen NICHTS bei (seit 03.11. können
+     * Verbindungen selbst selektiert sein): Verbindungen sind nicht
+     * bewegbar — sie folgen ihren Endpunkten. Vor allem dürfte ihre ID die
+     * owned-Texte NICHT hereinziehen: Ein Verbindungs-Label als Move-BASIS
+     * würde beim Drag RE-ANKERT statt gleiten.
      */
     @Override
     public List<UUID> findMoveSet(List<UUID> basisIds) {
-        List<UUID> moveSet = new ArrayList<>(basisIds);
+        List<UUID> moveSet = new ArrayList<>();
         for (UUID id : basisIds) {
+            if (objects.get(id) != null) {
+                moveSet.add(id);
+            }
+        }
+        List<UUID> objectBasis = List.copyOf(moveSet);
+        for (UUID id : objectBasis) {
             for (UUID textId : findTextIdsOwnedBy(id)) {
                 if (!moveSet.contains(textId)) {
                     moveSet.add(textId);
@@ -570,6 +710,118 @@ public class DiagramService implements DiagramQuery {
 
     @Override
     public Optional<TextAnchor> projectOntoConnection(UUID connectionId, double worldX, double worldY) {
+        return projectAnchor(connectionId, worldX, worldY);
+    }
+
+    // ---------- W-Gleiten & Re-Ankerung ----------
+
+    /**
+     * Re-Ankerung durch Drag (Gesten-Pfad MoveObject/MoveObjects): Die
+     * Zielposition wird auf die Kette projiziert — der Drag schreibt die
+     * Platzierungs-Absicht (t + Offset) neu, statt absolute Pixel zu setzen.
+     * Pro Drag-Segment ein ObjectTextChanged-Fakt; das Undo-Merge der
+     * TextChanged-Ops macht die ganze Geste zu EINEM Undo-Punkt, und das
+     * Inverse (SetAnchor mit dem alten Anker) leitet die Original-Position
+     * exakt wieder ab.
+     */
+    private void reanchorAt(Text text, double targetX, double targetY) {
+        Optional<TextAnchor> projected = projectAnchor(text.ownerId(), targetX, targetY);
+        if (projected.isEmpty()) {
+            return; // Ohne Connection kein Anker — defensiv (die Lösch-Kaskade hält den Owner am Leben)
+        }
+        Text updated = new Text(text.id(), text.content(), targetX, targetY,
+                text.width(), text.height(), projected.get(), text.ownerId(), text.layerId());
+        objects.put(text.id(), updated);
+        publishFact(new DiagramEvent.ObjectTextChanged(text, updated));
+    }
+
+    /**
+     * W-Gleiten: leitet die Positionen aller verankerten Texte der genannten
+     * Verbindungen aus ihren UNVERÄNDERTEN Ankern neu ab — der Anker ist die
+     * Absicht, x/y die abgeleitete Konsequenz. Unveränderte Positionen
+     * produzieren keinen Eintrag (kein Fakten-Rauschen); jede Änderung ist
+     * ein sichtbarer Move-Eintrag, nie eine versteckte Kaskade.
+     */
+    private List<DiagramEvent.ObjectMoved> deriveAnchoredTexts(Collection<UUID> connectionIds) {
+        List<DiagramEvent.ObjectMoved> moved = new ArrayList<>();
+        for (UUID connectionId : connectionIds) {
+            for (UUID textId : findTextIdsOwnedBy(connectionId)) {
+                if (!(objects.get(textId) instanceof Text text) || text.anchor() == null) {
+                    continue;
+                }
+                double[] center = anchoredCenter(text.anchor(), connectionId);
+                if (center[0] == text.x() && center[1] == text.y()) {
+                    continue; // Geometrie hat die Position nicht bewegt — kein Fakt.
+                }
+                Text updated = new Text(text.id(), text.content(), center[0], center[1],
+                        text.width(), text.height(), text.anchor(), text.ownerId(), text.layerId());
+                objects.put(textId, updated);
+                moved.add(new DiagramEvent.ObjectMoved(textId, text.x(), text.y(), center[0], center[1]));
+            }
+        }
+        return moved;
+    }
+
+    /** Ableiten + als eigener Batch-Fakt publizieren (Einzel-Moves, Restore-Pfade). */
+    private void publishGlide(Collection<UUID> objectIds) {
+        publishGlideForConnections(connectionsTouchingIds(objectIds));
+    }
+
+    private void publishGlideForConnections(Collection<UUID> connectionIds) {
+        List<DiagramEvent.ObjectMoved> glided = deriveAnchoredTexts(connectionIds);
+        if (!glided.isEmpty()) {
+            publishFact(new DiagramEvent.ObjectsMoved(List.copyOf(glided)));
+        }
+    }
+
+    /** Verbindungen, deren Kette die genannten Objekte berührt (Endpunkt oder
+     *  Kettenpunkt) — ihre verankerten Texte leiten bei Verformung neu ab. */
+    private Set<UUID> connectionsTouchingIds(Collection<UUID> ids) {
+        Set<UUID> affected = new LinkedHashSet<>();
+        for (Connection conn : connections.values()) {
+            if (ids.contains(conn.sourceId()) || ids.contains(conn.targetId())) {
+                affected.add(conn.id());
+                continue;
+            }
+            for (UUID waypointId : conn.waypointIds()) {
+                if (ids.contains(waypointId)) {
+                    affected.add(conn.id());
+                    break;
+                }
+            }
+        }
+        return affected;
+    }
+
+    /**
+     * Einfüge-Fall fürs W-Gleiten: Der neue Kettenpunkt teilt den Abschnitt
+     * insertAt in zwei; alle dahinterliegenden Abschnitte rücken um eins.
+     * Anker mit größerem Index ziehen mit (ObjectTextChanged — die Geometrie
+     * ihres Abschnitts ist unverändert, die Position bleibt); Anker AUF dem
+     * geteilten Abschnitt behalten (insertAt, t) und gleiten anschließend
+     * über deriveAnchoredTexts auf die erste Hälfte.
+     */
+    private void shiftAnchorsBeyond(UUID connectionId, int insertAt) {
+        for (UUID textId : findTextIdsOwnedBy(connectionId)) {
+            if (!(objects.get(textId) instanceof Text text) || text.anchor() == null) {
+                continue;
+            }
+            TextAnchor anchor = text.anchor();
+            if (anchor.segmentIndex() <= insertAt) {
+                continue;
+            }
+            TextAnchor shifted = new TextAnchor(anchor.segmentIndex() + 1,
+                    anchor.t(), anchor.offsetX(), anchor.offsetY());
+            Text updated = new Text(text.id(), text.content(), text.x(), text.y(),
+                    text.width(), text.height(), shifted, text.ownerId(), text.layerId());
+            objects.put(textId, updated);
+            publishFact(new DiagramEvent.ObjectTextChanged(text, updated));
+        }
+    }
+
+    /** Projektion auf die nächstgelegene Stelle der Verbindungskette; Offset =
+     *  Ziel − Ankerpunkt (das Label sitzt dort, wo es hingezogen wurde). */
+    private Optional<TextAnchor> projectAnchor(UUID connectionId, double worldX, double worldY) {
         Connection conn = connections.get(connectionId);
         if (conn == null) {
             return Optional.empty();
@@ -593,9 +845,6 @@ public class DiagramService implements DiagramQuery {
                 bestPoint = projected;
             }
         }
-        // Offset = Klick − Ankerpunkt: Das Label soll dort sitzen, wo der
-        // Benutzer geklickt hat (Kreation frei — Snapping greift erst beim
-        // Verschieben).
         return Optional.of(new TextAnchor(bestSegment, bestT,
                 worldX - bestPoint[0], worldY - bestPoint[1]));
     }

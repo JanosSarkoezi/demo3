@@ -53,6 +53,12 @@ public class ConnectionViewMapper {
         }
     }
 
+    /** Visualisierungs-Node einer Verbindung (für den Hover-Glow der View)
+     *  — null, wenn die Verbindung (noch) nicht gezeichnet ist. */
+    public Group groupOf(UUID connectionId) {
+        return visualConnections.get(connectionId);
+    }
+
     public void clear() {
         connectionLayer.getChildren().removeAll(visualConnections.values());
         visualConnections.clear();

@@ -291,10 +291,10 @@ public class UndoService {
     private ActionEvent resizeRequest(DiagramObject target) {
         return switch (target) {
             case Circle c -> new ActionEvent.ResizeCircle(c.id(), c.radius());
-            case Rectangle r -> new ActionEvent.ResizeObject(r.id(), r.width(), r.height());
-            case Text t -> new ActionEvent.ResizeObject(t.id(), t.width(), t.height());
+            case Rectangle r -> new ActionEvent.ResizeBox(r.id(), r.width(), r.height());
+            case Text t -> new ActionEvent.ResizeBox(t.id(), t.width(), t.height());
             // Waypoints haben keine Handles — der Service ignoriert das still.
-            case Waypoint w -> new ActionEvent.ResizeObject(w.id(), 0.0, 0.0);
+            case Waypoint w -> new ActionEvent.ResizeBox(w.id(), 0.0, 0.0);
         };
     }
 

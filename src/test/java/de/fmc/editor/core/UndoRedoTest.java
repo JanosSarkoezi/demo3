@@ -171,7 +171,7 @@ class UndoRedoTest {
         bus.publish(new ActionEvent.AddElement(rect));
         support.closeGesture(); // Erstellen ist ein eigener Undo-Punkt, Resize ein weiterer
 
-        bus.publish(new ActionEvent.ResizeObject(rect.id(), 80.0, 50.0));
+        bus.publish(new ActionEvent.ResizeBox(rect.id(), 80.0, 50.0));
         bus.publish(new ActionEvent.RequestUndo());
         Rectangle undone = (Rectangle) diagram.findById(rect.id()).orElseThrow();
         assertThat(undone.width()).isEqualTo(40.0);

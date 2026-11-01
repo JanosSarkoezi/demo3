@@ -65,6 +65,30 @@ class CameraConsistencyTest {
     }
 
     @Test
+    @DisplayName("worldToScreen ist das exakte Inverse zu screenToWorld (Roundtrip)")
+    void worldToScreenInvertsScreenToWorld() {
+        CameraInfo camera = new CameraInfo(2.0, 137.0, -42.0, defaultLayerId);
+
+        double worldX = 123.4;
+        double worldY = -56.7;
+        assertThat(camera.worldToScreenX(camera.screenToWorldX(worldX)))
+                .isCloseTo(worldX, within(1e-9));
+        assertThat(camera.worldToScreenY(camera.screenToWorldY(worldY)))
+                .isCloseTo(worldY, within(1e-9));
+
+        double screenX = 400.0;
+        double screenY = 250.0;
+        assertThat(camera.screenToWorldX(camera.worldToScreenX(screenX)))
+                .isCloseTo(screenX, within(1e-9));
+        assertThat(camera.screenToWorldY(camera.worldToScreenY(screenY)))
+                .isCloseTo(screenY, within(1e-9));
+
+        // Bekannte Punkte: zoom=2, offset=(137,-42) => world 100 -> screen 337.
+        assertThat(camera.worldToScreenX(100.0)).isEqualTo(337.0);
+        assertThat(camera.worldToScreenY(100.0)).isEqualTo(158.0);
+    }
+
+    @Test
     @DisplayName("PanView aktualisiert den Kamera-Snapshot im Bus")
     void panShouldUpdateCameraSnapshot() {
         eventBus.publish(new InputEvent.MousePressed(100.0, 100.0, CustomMouseButton.MIDDLE, 1));

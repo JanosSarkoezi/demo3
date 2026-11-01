@@ -6,6 +6,7 @@ import de.fmc.editor.core.service.DiagramService;
 import de.fmc.editor.core.service.SelectionService;
 import de.fmc.editor.core.service.UndoService;
 import de.fmc.editor.core.state.CameraInfo;
+import de.fmc.editor.ui.InlineTextEditorController;
 import de.fmc.editor.ui.InputEventTranslator;
 import de.fmc.editor.ui.ToolbarController;
 import de.fmc.editor.ui.UiMouseState;
@@ -27,6 +28,11 @@ import java.util.UUID;
  */
 public class Main extends Application {
 
+    /** Start-Raster in Welt-Einheiten (User-Entscheidung 1.11.: 20 statt 10).
+     *  Produkt-Startwert — die Test-Fixtures (BusTestSupport) bleiben bei 10,
+     *  ihre Gesten sind darauf kalibriert; dieser Wert lebt nur hier. */
+    private static final double INITIAL_GRID_SIZE = 20.0;
+
     @Override
     public void start(Stage stage) {
         // 1. Kern: Services + Bus konstruieren, DANACH attachen (Zirkularität).
@@ -37,7 +43,7 @@ public class Main extends Application {
         InteractionEventBus bus = new InteractionEventBus(
                 diagram,
                 new CameraInfo(1.0, 0.0, 0.0, defaultLayerId),
-                new GridSpec(10.0),
+                new GridSpec(INITIAL_GRID_SIZE),
                 selection);
         diagram.attachTo(bus);
         selection.attachTo(bus);
@@ -45,18 +51,28 @@ public class Main extends Application {
 
         // 2. UI-Schicht: View (stummer Scene-Graph), Toolbar (reiner
         //    Publisher), Übersetzer am Systemrand (JavaFX -> InputEvent).
-        ToolbarController toolbar = new ToolbarController(bus);
+        //    Die View zuerst: Der Toolbar wird der Fokus-Rückgabe-Hook für
+        //    das Snap-to-Grid-Feld übergeben (ENTER/ESC geben den Tastatur-
+        //    Fokus an die Zeichenfläche zurück, damit Shortcuts leben).
         GraphView graphView = new GraphView(bus, diagram);
+        ToolbarController toolbar = new ToolbarController(bus, INITIAL_GRID_SIZE,
+                graphView.viewRoot()::requestFocus);
         UiMouseState mouseState = new UiMouseState();
+        // Inline-Editor VOR dem Übersetzer konstruieren: Sein „Klick daneben
+        // committet"-Filter muss in der Filter-Kette VORRANG haben — der
+        // konsumierte Commit-Klick darf den Kern (und dessen requestFocus)
+        // nie erreichen. Reihenfolge = Registrierungsfolge auf demselben Node.
+        new InlineTextEditorController(bus, diagram, mouseState,
+                graphView.viewRoot(),
+                graphView::addToScreenOverlay,
+                graphView::removeFromScreenOverlay,
+                graphView.viewRoot()::requestFocus);
         new InputEventTranslator(graphView.viewRoot(), bus, mouseState);
 
-        // 3. Wegpunkte-Checkbox (reine UI-Sichtbarkeit, nie ein Bus-Event).
-        graphView.setWaypointsVisible(toolbar.waypointsVisibleProperty().get());
-        toolbar.waypointsVisibleProperty().addListener((obs, oldValue, newValue) ->
-                graphView.setWaypointsVisible(newValue));
-
-        // 4. Layout (demo2-Stil): Toolbar als Seitenpanel links, Zeichenfläche
-        //    füllt den Rest.
+        // 3. Layout (demo2-Stil): Toolbar als Seitenpanel links, Zeichenfläche
+        //    füllt den Rest. (Die Wegpunkt-Sichtbarkeit steuert seit Block 2
+        //    der Kern über WaypointFocusChanged — RouteEditMode per Klick auf
+        //    die Verbindung, kein Toolbar-Control mehr.)
         BorderPane layout = new BorderPane();
         layout.setLeft(toolbar.toolbarNode());
         layout.setCenter(graphView.viewRoot());

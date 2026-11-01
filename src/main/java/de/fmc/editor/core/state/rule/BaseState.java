@@ -15,6 +15,13 @@ public abstract class BaseState implements InteractionState {
      *  Basis-Klasse statt Kopien in jedem State. */
     protected static final double DRAG_THRESHOLD_PIXELS = 4.0;
 
+    /** Klick-Toleranz für Verbindungen in BILDSCHIRM-Pixeln (Hover-Glow und
+     *  RouteEditMode-Eintritt). Bildschirm-einheitlich statt demo2s fester
+     *  Welt-Toleranz: Bei Zoom-Out würde ein Welt-Maß den Hotspot schrumpfen
+     *  lassen, bei Zoom-In anschwellen. States rechnen sie per
+     *  camera().zoom() in Welt-Einheiten um. */
+    protected static final double CONNECTION_CLICK_TOLERANCE_PIXELS = 8.0;
+
     /** Prüft eine Regel unter Einbeziehung von Event UND Context (z. B. für Hit-Testing) */
     @FunctionalInterface
     public interface EventGuard<T extends DomainEvent> {

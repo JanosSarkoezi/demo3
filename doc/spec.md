@@ -1,17 +1,18 @@
 Was habe ich so geplant fuer den FMC-Editor:
 - Es soll allgemein eine Verschiebung des Canvas moegliche sein
 - Es soll allgemein ein Zoom an der Stelle des Mauszeigers mit dem Mausrad moeglich sein.
-- Erstellen von Kreisen (K) und Rechtecken (R) durch Auswahl eines Tools an der Seite. Also ein Tool fuer Ks udn eins fuer Rs.
+- Erstellen von Kreisen (K) und Rechtecken (R) durch Auswahl eines Tools an der Seite. Also ein Tool fuer Ks udn eins fuer Rs. Die Werkzeuge sind auch per Tastaturkuerzel erreichbar: K fuer Kreis, R fuer Rechteck, C fuer Verbindung, T fuer Text.
 - Erstellen von Verbindugen durch die Auswahl eines Tool an der Seite.
   - Klick auf das Start Objekt (zB K), dann moegliche zwischenpunkte (Waypoints W), und klick auf das Ziel Objekt (zB R). Es koennen 0-n Zwischenpunkte geben. Diese werden durch eine Linie verbunden und an den Ecken abgerunde. Wo die Linie endet, wird ein pfeil zu sehen sein.
   - Die Ws sind Routenpunkte ihrer Verbindung — Teil der Verbindung, keine eigenstaendigen Objekte. Sie sind die Erfindung, den Polygonzug von K nach R zu formen. Daraus ergibt sich:
     - Ws lassen sich per Klick oder Gummiband selektieren und einzeln verschieben, um die Form der Route nach eigenem Geschmack zu veraendern. Doppelklick auf ein W selektiert es nur (keine Resize-Griffe — Ws haben keine Groesse).
     - Sind BEIDE Endobjekte einer Verbindung in der Auswahl, wandern ihre Ws mit der gesamten Auswahl mit — die Route gehoert zur Verbindung, ihre Form bleibt erhalten. Das gilt auch dann, wenn die Ws gerade nicht sichtbar sind: Der Benutzer denkt in dem Moment nicht an unsichtbare Ws und erwartet, dass die ganze Verbindung mitkommt.
     - Ist nur EIN Endobjekt (oder keines) der Verbindung in der Auswahl, bleiben die Ws an ihrem Ort verankert.
-    - Feinsteuerung: Klick auf die Verbindung blendet den W-Layer ein (siehe Ebenen); danach lassen sich die Ws einzeln greifen und verschieben.
+    - Feinsteuerung: Klick auf eine Verbindung blendet ihre Ws ein und macht sie greifbar — als situativer Verbindungs-Modus, nicht als dauerhafter Layer-Schalter. Im Modus lassen sich die Ws per Klick, CTRL+Klick oder Gummiband selektieren und verschieben; DEL loescht die Auswahl (ueberlebende Verbindungen verlieren nur ihre geloeschten Ws). Klick daneben, ESC oder ein Werkzeugwechsel blendet die Ws wieder aus. Doppelklick auf ein freies Stueck der Verbindung fuegt dort einen neuen Zwischenpunkt an der Klickstelle ein — auch bei Direktverbindungen ohne Ws.
     - Waehrend des Verbindungsaufbaus gilt ein Klick auf ein vorhandenes W wie ein Klick auf die leere Flaeche: Es wird ein NEUER Zwischenpunkt an dieser Stelle gesetzt. Ws sind keine Verbindungsziele.
 - Verschieben von ausgewaehlten Objekten. Die Auswahl kann ein oder mehrere Objekte enhalten. Diese konnen sowohl Ks, Rs und Ws sien.
   - Beim Verschieben soll ein virtuelles Netz die Objekte an den Kreuzungspunkten kleben lassen bis die Maus naeher an dem neuen Kreuzungspunkt liegt. Spapping.
+    - Der Abstand des Netzes ist frei einstellbar (Eingabefeld in der Toolbar; Commit bei ENTER oder Fokus-Verlust, ungueltige Eingaben stellen sich still auf den letzten gueltigen Wert zurueck). Das Netz ist immer aktiv und wird nicht mit dem Diagramm gespeichert.
 - Auswahl von Objekten (Selektion):
   - Einfacher Klick auf ein Objekt: selektiert dieses Objekt und deselektiert die bisher ausgewaehlten Objekte.
   - Einfacher Klick auf ein anderes Objekt: selektiert das andere Objekt und deselektiert das aktuell selektierte Objekt.
@@ -21,6 +22,7 @@ Was habe ich so geplant fuer den FMC-Editor:
   - Einfacher Klick auf die leere Flaeche: hebt die Auswahl auf. Ebenso ESC.
   - CTRL+Klick+Drag auf der leeren Flaeche spannt ein Auswahlrechteck (Gummiband) auf. Beim Loslassen werden alle Objekte im Rechteck ausgewaehlt; das Band ersetzt die bisherige Auswahl. Ein CTRL+Klick ohne Drag aendert nichts, ESC bricht das Band ab.
 - Loeschen: Die DEL-Taste loescht alle aktuell selektierten Objekte.
+- Undo/Redo: CTRL+Z macht die letzte Geste rueckgaengig — pro Geste genau ein Schritt (Erstellen, Verschieben, Resizen, Loeschen inklusive Kaskade, Textaenderung, Verbindungsaufbau). SHIFT+CTRL+Z oder CTRL+Y wiederholt sie. Eine neue Aktion leert die Wiederholen-Historie.
 - Groessenanpassung der Ks und Rs. Auch Text-Boxen (siehe unten) sind auf diese Weise in der Groesse veraenderbar.
 - Angaben von Text durch Auswahl eines Text-Werkzeugs an der Seite:
   - Innerer Text im K: Ein K enthaelt 0 oder 1 Text, und dieser besteht aus genau einem Buchstaben. Die Eingabemaske begrenzt auf ein Zeichen.
@@ -29,16 +31,21 @@ Was habe ich so geplant fuer den FMC-Editor:
   - Externe Texte an K und R: 0 bis beliebig viele Texte koennen ausserhalb zu einem K oder R gehoeren.
     - Jeder externe Text hat eine eigene rechteckige Box und ist in der Groesse veraenderbar (Resize).
     - Wird das zugehoerige K oder R verschoben, wandern alle seine externen Texte mit.
+    - Jeder externe Text laesst sich zusaetzlich einzeln verschieben — nah an sein Objekt oder weiter weg, wie es die Lesbarkeit verlangt.
+    - Ueberlappt ein Text ein anderes Objekt (auch sein eigenes), gewinnt beim Klick das jeweils OBERE Objekt — einheitliche Topmost-Regel, kein Sonderfall fuer den Owner.
     - Wird das zugehoerige K oder R geloescht, werden seine externen Texte mitgeloelscht.
   - Text an Verbindungen: Jede Verbindung kann 0 oder 1 Text haben.
     - Der Text ist an einem Verbindungsabschnitt verankert (Anker): Ein Klick auf die Verbindung legt den Text am geklickten Abschnitt fest (z. B. zwischen W1 und W2), inklusive Abstand zur Linie.
     - Verschiebt der Benutzer den Text, wird der Anker neu gesetzt (naechstliegender Abschnitt plus Position entlang der Linie). Das Platzieren bleibt damit beim Benutzer.
     - Veraendert sich die Verbindung (z. B. ein W wird verschoben oder ein Endpunkt wandert), gleitet der Text mit seinem Abschnitt mit — die Platzierungs-Absicht bleibt erhalten.
+    - Auch beim gemeinsamen Verschieben beider Endobjekte (Gruppen-Move) bleibt der Text auf seiner Verbindung: Die ganze Kette wandert, der Text mit ihr.
     - Wird ein W geloescht, rutscht der Anker auf den dann letzten Abschnitt; Position entlang der Linie und Abstand bleiben.
+    - Wird ein W eingefuegt, bleiben alle Anker auf IHREM Stueck Linie: Anker auf dahinterliegenden Abschnitten ruecken mit ihren Abschnitten weiter; ein Anker auf dem geteilten Abschnitt bleibt bei seinem t und rueckt auf die erste Haelfte.
     - Der Text liegt in einer eigenen rechteckigen Box und ist in der Groesse veraenderbar.
+    - Auch das Verbindungs-Label ist mehrzeilig — derselbe Editor wie ueberall: Der Benutzer kann so viel hinschreiben, wie er will (nur der K-Buchstabe bleibt auf genau ein Zeichen begrenzt, FMC-Konvention).
     - Beim Verschieben gilt auch hier das Snapping: Der Anker wird so gesetzt, dass der Mittelpunkt der Box auf einem Gitterpunkt liegt. Veraendert sich die Verbindung spaeter, folgt der Text seinem Abschnitt (siehe oben).
     - Wird die Verbindung geloescht, verschwindet ihr Text mit.
-  - Freier Text: Ein Klick auf die leere Flaeche erzeugt einen freien Text ohne Zuordnung (z. B. fuer Anmerkungen).
+  - Freier Text: Ein Klick auf die leere Flaeche erzeugt einen freien Text ohne Zuordnung (z. B. fuer Anmerkungen). Freie Texte lassen sich jederzeit verschieben.
   - Snapping von Texten: Beim VERSCHIEBEN eines Textes landet der Mittelpunkt seiner Bounding-Box auf einem Gitterpunkt des virtuellen Netzes. Bei der Erstellung bleibt der Text frei an der Klickstelle bzw. an seiner Default-Position. So lassen sich Texte neben oder ueber einem R so anordnen, dass der Text-Mittelpunkt und der R-Mittelpunkt auf einer Linie liegen.
 - Bedienung des Text-Werkzeugs:
   - Klick auf ein K oder R: legt den inneren Text an bzw. oeffnet ihn zum Bearbeiten.
@@ -46,7 +53,7 @@ Was habe ich so geplant fuer den FMC-Editor:
   - Klick auf einen bestehenden Text: oeffnet diesen Text zum Bearbeiten.
   - Klick in die Naehe einer Verbindung: legt das Verbindungs-Label am geklickten Abschnitt an. Hat die Verbindung bereits einen Text, wird dieser stattdessen geoeffnet (maximal einer pro Verbindung).
   - Doppelklick (im Auswahl-Werkzeug) oeffnet die Resize-Griffe — einheitlich bei K, R und Texten.
-- Textbearbeitung: Der Text wird in einem Inline-Editor direkt am Platz bearbeitet. ENTER schliesst die Eingabe ab (nur bei Aenderung wirkt sie sich aus), ESC verwirft sie, ein Klick daneben schliesst ebenfalls ab.
+- Textbearbeitung: Der Text wird in einem mehrzeiligen Inline-Editor direkt am Platz bearbeitet — freie Texte, R-Inhalt und Verbindungs-Label teilen sich denselben Editor; nur der K-Buchstabe ist ein Ein-Zeichen-Feld. Im mehrzeiligen Editor fuegt ENTER eine neue Zeile ein; CTRL+ENTER schliesst die Eingabe ab (nur bei Aenderung wirkt sie sich aus), ESC verwirft sie, ein Klick daneben schliesst ebenfalls ab. Beim K-Buchstaben committet ENTER direkt. Ein abschliessender Klick wirkt NUR als Abschluss — er selektiert nichts und loest keine Folgewirkung aus; der naechste Klick wirkt wieder ganz normal.
 - Speicherformat: Das JSON-Format erhaelt zusaetzlich einen "texts"-Abschnitt (freie, externe und Verbindungs-Texte mit Box und Zuordnung) sowie ein "label"-Feld beim K und "content"/"centered" beim R.
 - Das geammte gezeichnete Objekt kann im volgenden Format gespeichert werden:
 ```json

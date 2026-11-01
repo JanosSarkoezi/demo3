@@ -182,17 +182,20 @@ class BoxSelectionTest {
     }
 
     @Test
-    @DisplayName("Waypoints sind volle Gummiband-Ziele (Routenpunkte, selektierbar)")
-    void waypointsAreBandTargets() {
+    @DisplayName("Waypoints sind im Idle KEINE Band-Ziele (unsichtbar, keine heimlichen Treffer)")
+    void waypointsAreNoBandTargetsInIdle() {
         Circle a = addCircle(100.0, 100.0);
         Rectangle rect = addRectangle(300.0, 100.0);
         Waypoint waypoint = new Waypoint(UUID.randomUUID(), 200.0, 100.0, defaultLayerId);
         eventBus.publish(new ActionEvent.CreateConnection(a.id(), rect.id(), List.of(waypoint)));
 
-        // Band überspannt ALLES — auch den Waypoint auf (200, 100)
+        // Band überspannt ALLES — auch den Waypoint auf (200, 100):
+        // Im Idle bleibt das W unsichtbar und wird herausgefiltert. Die Ws
+        // vollselektierter Verbindungen wandern beim Move über findMoveSet
+        // mit, ohne selbst in der Auswahl zu stehen.
         performBand(0.0, 0.0, 400.0, 200.0);
 
         assertThat(selectionFacts.getLast().selectedIds())
-                .containsExactly(a.id(), rect.id(), waypoint.id());
+                .containsExactly(a.id(), rect.id());
     }
 }

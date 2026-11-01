@@ -12,6 +12,7 @@ import de.fmc.editor.core.model.ToolType;
 import de.fmc.editor.core.model.Waypoint;
 import de.fmc.editor.core.service.DiagramService;
 import de.fmc.editor.core.state.impl.IdleToolState;
+import de.fmc.editor.core.state.impl.RouteEditModeState;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -39,6 +40,7 @@ class WaypointSelectionMoveTest {
     private DiagramService diagram;
     private final List<DiagramEvent.SelectionChanged> selectionFacts = new ArrayList<>();
     private final List<DiagramEvent.ConnectionEstablished> established = new ArrayList<>();
+    private final List<ActionEvent.WaypointFocusChanged> focusHints = new ArrayList<>();
     private UUID defaultLayerId;
 
     /** Szenario: K und R, verbunden über zwei Ws (W1 über K, W2 über R). */
@@ -55,6 +57,7 @@ class WaypointSelectionMoveTest {
         defaultLayerId = support.defaultLayerId;
         bus.subscribe(DiagramEvent.SelectionChanged.class, selectionFacts::add);
         bus.subscribe(DiagramEvent.ConnectionEstablished.class, established::add);
+        bus.subscribe(ActionEvent.WaypointFocusChanged.class, focusHints::add);
 
         k = support.addCircle(100.0, 100.0);          // r=20 -> y in [80,120]
         r = support.addRectangle(300.0, 100.0);       // 40x30 -> y in [85,115]
@@ -77,23 +80,30 @@ class WaypointSelectionMoveTest {
     }
 
     @Test
-    @DisplayName("Klick auf ein Waypoint selektiert es — volle Klick-Ziele")
-    void clickOnWaypointSelectsIt() {
-        click(100.0, 60.0, false);
+    @DisplayName("CTRL+Klick auf ein Waypoint (Position) betritt den RouteEditMode (keine Selektion)")
+    void ctrlClickOnWaypointPositionEntersRouteEditMode() {
+        UUID connId = established.getLast().connection().id();
+        int factsBefore = selectionFacts.size();
 
-        assertThat(selectionFacts.getLast().selectedIds()).containsExactly(w1.id());
+        click(100.0, 60.0, true);
+
+        // Der Klick zielt auf die Route: kein SelectionChanged ...
+        assertThat(selectionFacts).hasSize(factsBefore);
+        // ... aber der Fokus-Hinweis trägt die Verbindung.
+        assertThat(focusHints.getLast().connectionId()).isEqualTo(connId);
+        assertThat(bus.getToolState()).isInstanceOf(RouteEditModeState.class);
     }
 
     @Test
-    @DisplayName("Gummiband erfasst Objekte UND Waypoints — in z-Ordnung")
-    void bandCatchesWaypointsAndObjects() {
+    @DisplayName("Gummiband im Idle erfasst nur Objekte — die Ws wandern über findMoveSet mit")
+    void bandCatchesObjectsOnly() {
         // Ctrl-Press auf leerer Fläche, Drag über die Schwelle, Release
         bus.publish(new InputEvent.MousePressed(50.0, 30.0, CustomMouseButton.PRIMARY, 1, true));
         bus.publish(new InputEvent.MouseDragged(350.0, 130.0, CustomMouseButton.PRIMARY));
         bus.publish(new InputEvent.MouseReleased(350.0, 130.0, CustomMouseButton.PRIMARY));
 
         assertThat(selectionFacts.getLast().selectedIds())
-                .containsExactly(k.id(), r.id(), w1.id(), w2.id());
+                .containsExactly(k.id(), r.id());
     }
 
     @Test
@@ -124,9 +134,12 @@ class WaypointSelectionMoveTest {
     }
 
     @Test
-    @DisplayName("Direkt selektiertes W bewegt sich allein (Umformen der Route)")
+    @DisplayName("Im RouteEditMode direkt selektiertes W bewegt sich allein (Umformen der Route)")
     void explicitlySelectedWaypointMovesAlone() {
-        click(100.0, 60.0, false);   // W1 exklusiv selektiert
+        click(100.0, 60.0, true);    // CTRL+Klick -> RouteEditMode
+
+        click(100.0, 60.0, false);   // W1 exklusiv selektieren (im Modus)
+        assertThat(selectionFacts.getLast().selectedIds()).containsExactly(w1.id());
 
         dragRightBy40(100.0, 60.0);  // Plain-Press auf W1
 
@@ -134,6 +147,8 @@ class WaypointSelectionMoveTest {
         assertThat(diagram.findById(k.id()).orElseThrow().x()).isEqualTo(100.0);
         assertThat(diagram.findById(r.id()).orElseThrow().x()).isEqualTo(300.0);
         assertThat(diagram.findById(w2.id()).orElseThrow().x()).isEqualTo(300.0);
+        // Nach der Geste bleibt der Modus erhalten (Feinschliff fortsetzbar).
+        assertThat(bus.getToolState()).isInstanceOf(RouteEditModeState.class);
     }
 
     @Test
@@ -176,14 +191,22 @@ class WaypointSelectionMoveTest {
     }
 
     @Test
-    @DisplayName("Doppelklick auf ein W selektiert nur — kein Resize-Modus")
+    @DisplayName("Doppelklick auf ein W selektiert es nur — kein Resize-Modus, Modus bleibt")
     void doubleClickOnWaypointSelectsWithoutResizeMode() {
+        var resizeHints = new ArrayList<ActionEvent.ResizeModeChanged>();
+        bus.subscribe(ActionEvent.ResizeModeChanged.class, resizeHints::add);
+
+        // Erster Press(1) auf W1 -> selektiert die Verbindung (Plain-Klick;
+        // W ist im Idle kein Klick-Ziel). Zweiter Press(2) -> betritt den
+        // Modus und selektiert NUR das W (Ws haben keine Griffe).
+        bus.publish(new InputEvent.MousePressed(100.0, 60.0, CustomMouseButton.PRIMARY, 1));
+        bus.publish(new InputEvent.MouseReleased(100.0, 60.0, CustomMouseButton.PRIMARY));
+
         bus.publish(new InputEvent.MousePressed(100.0, 60.0, CustomMouseButton.PRIMARY, 2));
         bus.publish(new InputEvent.MouseReleased(100.0, 60.0, CustomMouseButton.PRIMARY));
 
-        // Kein ResizeModeState: Der folgende Drag bewegt das W (im Resize-Modus
-        // würde der Press abwählen und der Drag ins Leere laufen).
-        assertThat(bus.getToolState()).isInstanceOf(IdleToolState.class);
+        assertThat(bus.getToolState()).isInstanceOf(RouteEditModeState.class);
+        assertThat(resizeHints).isEmpty();
         assertThat(selectionFacts.getLast().selectedIds()).containsExactly(w1.id());
 
         dragRightBy40(100.0, 60.0);

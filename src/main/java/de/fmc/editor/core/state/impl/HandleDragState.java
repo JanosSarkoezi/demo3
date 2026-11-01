@@ -7,6 +7,7 @@ import de.fmc.editor.core.model.Circle;
 import de.fmc.editor.core.model.DiagramObject;
 import de.fmc.editor.core.model.HandleType;
 import de.fmc.editor.core.model.Rectangle;
+import de.fmc.editor.core.model.Text;
 import de.fmc.editor.core.state.InteractionContext;
 import de.fmc.editor.core.state.rule.BaseState;
 
@@ -96,29 +97,49 @@ public final class HandleDragState extends BaseState {
         }
 
         if (target instanceof Rectangle rectangle) {
-            double newWidth = rectangle.width();
-            double newHeight = rectangle.height();
-
-            // Ecken-Griffe: beide Dimensionen; Seiten-Griffe: nur die eine Richtung
-            boolean affectsWidth = handle == HandleType.W || handle == HandleType.E
-                    || handle == HandleType.NW || handle == HandleType.NE
-                    || handle == HandleType.SW || handle == HandleType.SE;
-            boolean affectsHeight = handle == HandleType.N || handle == HandleType.S
-                    || handle == HandleType.NW || handle == HandleType.NE
-                    || handle == HandleType.SW || handle == HandleType.SE;
-
-            if (affectsWidth) {
-                newWidth = Math.max(2 * Math.abs(lastWorldX - rectangle.x()), minSize);
-            }
-            if (affectsHeight) {
-                newHeight = Math.max(2 * Math.abs(lastWorldY - rectangle.y()), minSize);
-            }
+            double[] box = boxGeometry(rectangle.x(), rectangle.y(),
+                    rectangle.width(), rectangle.height(), minSize);
             return new Rectangle(rectangle.id(), rectangle.x(), rectangle.y(),
-                    newWidth, newHeight, rectangle.content(), rectangle.centered(),
+                    box[0], box[1], rectangle.content(), rectangle.centered(),
                     rectangle.layerId());
         }
 
+        // Text-Box: dieselbe symmetrische Box-Mathematik wie das R (beide
+        // nutzen die gemeinsamen ofBox-Griffe) — nur Maße ändern, Anker/
+        // Owner/Position bleiben (verankerte Texte resizen mit, ihre
+        // Position leitet weiterhin der Service ab).
+        if (target instanceof Text text) {
+            double[] box = boxGeometry(text.x(), text.y(),
+                    text.width(), text.height(), minSize);
+            return new Text(text.id(), text.content(), text.x(), text.y(),
+                    box[0], box[1], text.anchor(), text.ownerId(), text.layerId());
+        }
+
         return target;
+    }
+
+    /** Gemeinsame Box-Resize-Mathematik für Rectangle und Text: symmetrisch
+     *  ums Zentrum, geklemmt auf mindestens eine Grid-Zelle; Ecken-Griffe
+     *  ändern beide Dimensionen, Seiten-Griffe nur ihre Richtung. */
+    private double[] boxGeometry(double centerX, double centerY,
+                                 double width, double height, double minSize) {
+        double newWidth = width;
+        double newHeight = height;
+
+        boolean affectsWidth = handle == HandleType.W || handle == HandleType.E
+                || handle == HandleType.NW || handle == HandleType.NE
+                || handle == HandleType.SW || handle == HandleType.SE;
+        boolean affectsHeight = handle == HandleType.N || handle == HandleType.S
+                || handle == HandleType.NW || handle == HandleType.NE
+                || handle == HandleType.SW || handle == HandleType.SE;
+
+        if (affectsWidth) {
+            newWidth = Math.max(2 * Math.abs(lastWorldX - centerX), minSize);
+        }
+        if (affectsHeight) {
+            newHeight = Math.max(2 * Math.abs(lastWorldY - centerY), minSize);
+        }
+        return new double[]{newWidth, newHeight};
     }
 
     private void commitResize(InteractionContext context) {
@@ -130,7 +151,10 @@ public final class HandleDragState extends BaseState {
             context.publisher().publish(new ActionEvent.ResizeCircle(circle.id(), circle.radius()));
         } else if (result instanceof Rectangle rectangle) {
             context.publisher().publish(
-                    new ActionEvent.ResizeObject(rectangle.id(), rectangle.width(), rectangle.height()));
+                    new ActionEvent.ResizeBox(rectangle.id(), rectangle.width(), rectangle.height()));
+        } else if (result instanceof Text text) {
+            context.publisher().publish(
+                    new ActionEvent.ResizeBox(text.id(), text.width(), text.height()));
         }
     }
 }

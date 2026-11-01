@@ -8,7 +8,9 @@ import de.fmc.editor.core.model.Circle;
 import de.fmc.editor.core.model.DiagramObject;
 import de.fmc.editor.core.model.DiagramQuery;
 import de.fmc.editor.core.model.GridSpec;
+import de.fmc.editor.core.model.Rectangle;
 import de.fmc.editor.core.model.ToolType;
+import de.fmc.editor.core.model.Waypoint;
 import de.fmc.editor.core.service.SelectionService;
 import de.fmc.editor.core.state.CameraInfo;
 import de.fmc.editor.core.state.impl.CircleToolState;
@@ -34,11 +36,22 @@ class CircleCreationTest {
         createdEvents = new ArrayList<>();
         defaultLayerId = UUID.randomUUID();
 
-        // Stub für DiagramQuery: Simulation einer leeren Zeichenfläche
-        DiagramQuery emptyDiagram = new DiagramQuery() {
+        // Kamera-Konfiguration ohne Zoom (1.0) und ohne Offset (0,0)
+        CameraInfo cameraInfo = new CameraInfo(1.0, 0.0, 0.0, defaultLayerId);
+
+        eventBus = new InteractionEventBus(emptyDiagram(), cameraInfo,
+                new GridSpec(10.0), new SelectionService());
+
+        // Event-Listener zur Aufzeichnung gefeuerter AddElement-Events
+        eventBus.subscribe(ActionEvent.AddElement.class, createdEvents::add);
+    }
+
+    /** Stub für DiagramQuery: Simulation einer leeren Zeichenfläche. */
+    private static DiagramQuery emptyDiagram() {
+        return new DiagramQuery() {
             @Override
             public Optional<DiagramObject> findTopmostAt(double x, double y) {
-                return Optional.empty(); // Keine Objekte vorhanden
+                return Optional.empty();
             }
 
             @Override
@@ -46,15 +59,31 @@ class CircleCreationTest {
                 return Optional.empty();
             }
         };
+    }
 
-        // Kamera-Konfiguration ohne Zoom (1.0) und ohne Offset (0,0)
-        CameraInfo cameraInfo = new CameraInfo(1.0, 0.0, 0.0, defaultLayerId);
+    /** Stub, der GENAU an (occupiedX, occupiedY) ein Objekt meldet. */
+    private static DiagramQuery diagramWith(DiagramObject occupant) {
+        return new DiagramQuery() {
+            @Override
+            public Optional<DiagramObject> findTopmostAt(double x, double y) {
+                // Hit-Match: dieselbe Stelle wie die spätere Klick-Position
+                return Math.hypot(x - occupant.x(), y - occupant.y()) < 1.0
+                        ? Optional.of(occupant)
+                        : Optional.empty();
+            }
 
-        eventBus = new InteractionEventBus(emptyDiagram, cameraInfo,
-                new GridSpec(10.0), new SelectionService());
+            @Override
+            public Optional<DiagramObject> findById(UUID id) {
+                return id.equals(occupant.id()) ? Optional.of(occupant) : Optional.empty();
+            }
+        };
+    }
 
-        // Event-Listener zur Aufzeichnung gefeuerter AddElement-Events
-        eventBus.subscribe(ActionEvent.AddElement.class, createdEvents::add);
+    /** Klick-Geste im angegebenen Werkzeug an (clickX, clickY). */
+    private void clickInTool(ToolType tool, double clickX, double clickY) {
+        eventBus.publish(new ActionEvent.SelectTool(tool));
+        eventBus.publish(new InputEvent.MousePressed(clickX, clickY, CustomMouseButton.PRIMARY, 1));
+        eventBus.publish(new InputEvent.MouseReleased(clickX, clickY, CustomMouseButton.PRIMARY));
     }
 
     @Test
@@ -88,5 +117,53 @@ class CircleCreationTest {
 
         // 4. Prüfen, dass das System weiterhin im CircleToolState ist (für fortlaufendes Zeichnen)
         assertThat(eventBus.getToolState()).isInstanceOf(CircleToolState.class);
+    }
+
+    @Test
+    @DisplayName("Klick auf ein bestehendes Objekt erzeugt KEINEN Kreis (stiller No-Op)")
+    void clickOnExistingObjectDoesNotCreateCircle() {
+        Circle occupied = new Circle(UUID.randomUUID(), 150.0, 200.0, 20.0, defaultLayerId);
+        eventBus = new InteractionEventBus(diagramWith(occupied),
+                new CameraInfo(1.0, 0.0, 0.0, defaultLayerId),
+                new GridSpec(10.0), new SelectionService());
+        eventBus.subscribe(ActionEvent.AddElement.class, createdEvents::add);
+
+        clickInTool(ToolType.CIRCLE, 150.0, 200.0);
+
+        // Kein deckungsgleicher Stapel — nur ein stiller No-Op:
+        assertThat(createdEvents).isEmpty();
+        assertThat(eventBus.getToolState()).isInstanceOf(CircleToolState.class);
+    }
+
+    @Test
+    @DisplayName("Klick auf ein bestehendes Objekt erzeugt KEIN Rechteck (geteilter State)")
+    void clickOnExistingObjectDoesNotCreateRectangle() {
+        Rectangle occupied = new Rectangle(UUID.randomUUID(), 150.0, 200.0, 40.0, 30.0, defaultLayerId);
+        eventBus = new InteractionEventBus(diagramWith(occupied),
+                new CameraInfo(1.0, 0.0, 0.0, defaultLayerId),
+                new GridSpec(10.0), new SelectionService());
+        eventBus.subscribe(ActionEvent.AddElement.class, createdEvents::add);
+
+        clickInTool(ToolType.RECTANGLE, 150.0, 200.0);
+
+        assertThat(createdEvents).isEmpty();
+        assertThat(eventBus.getToolState())
+                .isInstanceOf(de.fmc.editor.core.state.impl.RectangleToolState.class);
+    }
+
+    @Test
+    @DisplayName("Klick auf ein (unsichtbares) W blockiert die Erzeugung nicht")
+    void clickOnWaypointStillCreatesCircle() {
+        Waypoint occupied = new Waypoint(UUID.randomUUID(), 150.0, 200.0, defaultLayerId);
+        eventBus = new InteractionEventBus(diagramWith(occupied),
+                new CameraInfo(1.0, 0.0, 0.0, defaultLayerId),
+                new GridSpec(10.0), new SelectionService());
+        eventBus.subscribe(ActionEvent.AddElement.class, createdEvents::add);
+
+        clickInTool(ToolType.CIRCLE, 150.0, 200.0);
+
+        // Ws sind außerhalb des RouteEditMode unsichtbar und dürfen Klicks
+        // nicht verschlucken — die Erzeugung passiert:
+        assertThat(createdEvents).hasSize(1);
     }
 }
