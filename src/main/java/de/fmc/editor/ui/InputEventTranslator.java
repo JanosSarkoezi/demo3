@@ -26,11 +26,18 @@ public class InputEventTranslator {
     private final EventBusPublisher publisher;
     private final UiMouseState mouseState;
     private final Node eventRoot;
+    /** Datei-Aktionen (CTRL+S/CTRL+O) — reine UI-Flows (FileChooser), im Main
+     *  an den PersistenceController verdrahtet. */
+    private final Runnable onSaveShortcut;
+    private final Runnable onLoadShortcut;
 
-    public InputEventTranslator(Node eventRoot, EventBusPublisher publisher, UiMouseState mouseState) {
+    public InputEventTranslator(Node eventRoot, EventBusPublisher publisher, UiMouseState mouseState,
+                                Runnable onSaveShortcut, Runnable onLoadShortcut) {
         this.eventRoot = eventRoot;
         this.publisher = publisher;
         this.mouseState = mouseState;
+        this.onSaveShortcut = onSaveShortcut;
+        this.onLoadShortcut = onLoadShortcut;
 
         eventRoot.setFocusTraversable(true);
 
@@ -148,6 +155,21 @@ public class InputEventTranslator {
             return; // Getippte Zeichen gehören dem Editor, nie dem Kern.
         }
         KeyCode code = event.getCode();
+        // Speichern/Laden (CTRL+S/CTRL+O) sind reine UI-Flows (FileChooser):
+        // Dafür gibt es bewusst keine Core-Events — der Übersetzer greift sie
+        // am Systemrand ab wie CTRL+Z/Y und reicht die Aktion in die UI-Schicht.
+        if (event.isControlDown() && !event.isShiftDown()) {
+            if (code == KeyCode.S) {
+                onSaveShortcut.run();
+                event.consume();
+                return;
+            }
+            if (code == KeyCode.O) {
+                onLoadShortcut.run();
+                event.consume();
+                return;
+            }
+        }
         if (code == KeyCode.Z || code == KeyCode.Y) {
             if (event.isControlDown() && event.isShiftDown()) {
                 publisher.publish(new ActionEvent.RequestRedo());

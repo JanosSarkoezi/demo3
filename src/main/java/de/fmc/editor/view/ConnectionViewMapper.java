@@ -19,6 +19,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -65,13 +66,28 @@ public class ConnectionViewMapper {
     }
 
     /**
-     * Aktualisiert eine Verbindung: existiert noch kein Node, wird er erzeugt;
-     * sonst werden Pfad und Pfeil IN-PLACE überschrieben (kein Node-Re-Layout
-     * im Szenengraphen — die demo2-Optimierung).
+     * Aktualisiert eine Verbindung gegen den MODELLSTAND: existiert noch kein
+     * Node, wird er erzeugt; sonst werden Pfad und Pfeil IN-PLACE überschrieben
+     * (kein Node-Re-Layout im Szenengraphen — die demo2-Optimierung).
      */
     public void refresh(Connection conn) {
-        var source = diagramQuery.findById(conn.sourceId());
-        var target = diagramQuery.findById(conn.targetId());
+        refresh(conn, null);
+    }
+
+    /**
+     * Aktualisiert eine Verbindung — optional gegen eine Live-Vorschau-Geometrie:
+     * Das {@code override}-Record ersetzt das per Query aufgelöste Objekt, wenn
+     * seine ID auf einen Endpunkt oder Waypoint der Verbindung passt. So klebt
+     * die Pfeilspitze während der Resize-Geste schon am GEZOGENEN Rand, bevor
+     * das Modell beim Loslassen committet (demo2-Sichtverhalten, demo3-
+     * Mechanismus: Hinweis statt Modell-Fakt — kein Undo-Rauschen im Drag).
+     *
+     * @param override Geometrie-Record aus dem ResizePreviewChanged-Hinweis
+     *                 oder null für den Modellstand.
+     */
+    public void refresh(Connection conn, DiagramObject override) {
+        var source = resolve(conn.sourceId(), override);
+        var target = resolve(conn.targetId(), override);
 
         // Kaskaden-Fenster: Endpunkt schon/noch weg → nichts zeichnen.
         if (source.isEmpty() || target.isEmpty()) {
@@ -81,7 +97,7 @@ public class ConnectionViewMapper {
 
         List<DiagramObject> waypoints = new ArrayList<>();
         for (UUID wpId : conn.waypointIds()) {
-            diagramQuery.findById(wpId)
+            resolve(wpId, override)
                     .filter(Waypoint.class::isInstance)
                     .ifPresent(waypoints::add);
         }
@@ -212,6 +228,15 @@ public class ConnectionViewMapper {
 
         double t = Math.min(tX, tY);
         return new Point2D(cx + dx * t, cy + dy * t);
+    }
+
+    /** Auflösung einer Objekt-ID mit optionalem Geometrie-Override:
+     *  passt die ID des Preview-Records, gewinnt es gegen den Modellstand. */
+    private Optional<DiagramObject> resolve(UUID id, DiagramObject override) {
+        if (override != null && override.id().equals(id)) {
+            return Optional.of(override);
+        }
+        return diagramQuery.findById(id);
     }
 
     private double halfWidth(DiagramObject obj) {

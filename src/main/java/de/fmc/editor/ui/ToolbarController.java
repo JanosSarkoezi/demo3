@@ -18,14 +18,18 @@ import javafx.scene.shape.Line;
 import javafx.scene.shape.Rectangle;
 
 /**
- * Werkzeugleiste im demo2-Stil: seitliches Panel mit Sektionen („Shapes",
- * „Bearbeiten", „Settings"), Icon-Buttons und blauer Akzentleiste am
+ * Werkzeugleiste im demo2-Stil: seitliches Panel mit Sektionen („Datei",
+ * „Shapes", „Bearbeiten", „Settings"), Icon-Buttons und blauer Akzentleiste am
  * aktiven Werkzeug. Reiner Publisher von Bus-Events plus Sync des aktiven
  * Zustands — bewusst kein eigener „Select"-Button (gar kein aktiver Toggle
  * MEINT das Select-Werkzeug, wie in demo2).
  *
+ * Speichern/Laden (Persistenz-Block, 03.11.) sind reine UI-Flows im
+ * {@link PersistenceController} — die Toolbar hält nur die Buttons und reicht
+ * die Actions durch (wie Main es verdrahtet).
+ *
  * Nicht in Block 1: Text-Sektion (Font/Größe/Bold/Italic — Block 3),
- * Snap/Sticky-Checkboxen (Block 2+), Speichern/Laden (Persistenz-Block).
+ * Snap/Sticky-Checkboxen (Block 2+).
  *
  * @author saj
  */
@@ -43,12 +47,19 @@ public final class ToolbarController {
      *  Ein Textfeld muss den Fokus zum Tippen nehmen und gibt ihn ohne
      *  dies nie zurück — Shortcuts lebten dann nur noch im Feld. */
     private final Runnable returnFocusToCanvas;
+    /** Datei-Aktionen (Speichern/Laden) — im Main an den PersistenceController
+     *  verdrahtet; die Toolbar bleibt reiner Publisher ohne Datei-Zugriff. */
+    private final Runnable onSave;
+    private final Runnable onLoad;
 
     public ToolbarController(final InteractionEventBus bus, final double initialGridSize,
-                             final Runnable returnFocusToCanvas) {
+                             final Runnable returnFocusToCanvas,
+                             final Runnable onSave, final Runnable onLoad) {
         this.bus = bus;
         this.lastValidGridSize = initialGridSize;
         this.returnFocusToCanvas = returnFocusToCanvas;
+        this.onSave = onSave;
+        this.onLoad = onLoad;
 
         circleButton = createToolButton("Kreis", "Kreis zeichnen (K)", ToolType.CIRCLE,
                 new Circle(8.0));
@@ -93,7 +104,14 @@ public final class ToolbarController {
             bar.getStylesheets().add(css);
         }
 
+        // --- Datei (Speichern/Laden — Actions aus dem PersistenceController) ---
+        bar.getChildren().add(sectionLabel("Datei"));
+        bar.getChildren().addAll(
+                createActionButton("Speichern…", onSave),
+                createActionButton("Laden…", onLoad));
+
         // --- Shapes ---
+        bar.getChildren().add(sectionSeparator());
         bar.getChildren().add(sectionLabel("Shapes"));
         bar.getChildren().addAll(circleButton, rectangleButton, connectButton, textButton);
 

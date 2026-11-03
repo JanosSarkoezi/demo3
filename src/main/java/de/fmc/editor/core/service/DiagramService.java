@@ -86,6 +86,7 @@ public class DiagramService implements DiagramQuery {
         bus.subscribe(ActionEvent.UpdateText.class, this::onUpdateText);
         bus.subscribe(ActionEvent.SetAnchor.class, this::onSetAnchor);
         bus.subscribe(ActionEvent.AddAnchoredText.class, this::onAddAnchoredText);
+        bus.subscribe(ActionEvent.LoadDiagram.class, this::onLoadDiagram);
     }
 
     // ---------- Schreibpfad: ActionEvents (Requests) konsumieren ----------
@@ -554,6 +555,46 @@ public class DiagramService implements DiagramQuery {
                 event.width(), event.height(), event.anchor(), event.connectionId(), event.layerId());
         addToModel(text);
         publishFact(new DiagramEvent.ObjectAdded(text));
+    }
+
+    // ---------- Persistenz: Laden (Restore — kein Erzeugen) ----------
+
+    /**
+     * Ersetzt den gesamten Bestand: alte Objekte/Connections weg, geladene
+     * rein — ohne Validierung (Restore-Pfad: ConnectionRules prüfen NEUE
+     * Verbindungen; eine ältere Datei mit heute verbotener Verbindung muss
+     * trotzdem laden, demo2 umging die Validierung genauso).
+     *
+     * EIN DiagramReset-Fakt mit dem kompletten Nach-Zustand: Die View baut
+     * daraus neu auf, UndoService leert die History, SelectionService die
+     * Auswahl — alle über ihre Subscriptions, ohne dass der Loader sie
+     * einzeln anrufen müsste (demo2 rief die History von der Toolbar aus:
+     * nicht kopieren). Duplikate/Defekte überspringt der Handler still.
+     */
+    private void onLoadDiagram(ActionEvent.LoadDiagram event) {
+        objects.clear();
+        zOrder.clear();
+        connections.clear();
+
+        List<DiagramObject> loadedObjects = new ArrayList<>();
+        for (DiagramObject obj : event.objects()) {
+            if (obj == null || objects.containsKey(obj.id())) {
+                continue; // Duplikat/Defekt still überspringen — kein Crash
+            }
+            objects.put(obj.id(), obj);
+            zOrder.add(obj.id());
+            loadedObjects.add(obj);
+        }
+        List<Connection> loadedConnections = new ArrayList<>();
+        for (Connection conn : event.connections()) {
+            if (conn == null || connections.containsKey(conn.id())) {
+                continue;
+            }
+            connections.put(conn.id(), conn);
+            loadedConnections.add(conn);
+        }
+        publishFact(new DiagramEvent.DiagramReset(
+                List.copyOf(loadedObjects), List.copyOf(loadedConnections)));
     }
 
     // ---------- Lesepfad: DiagramQuery implementieren ----------

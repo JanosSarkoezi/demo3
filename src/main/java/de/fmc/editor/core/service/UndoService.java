@@ -98,8 +98,21 @@ public class UndoService {
         bus.subscribe(DiagramEvent.ConnectionsUpdated.class,
                 fact -> record(new UpdatedConnections(fact.previous(), fact.updated())));
 
+        // Laden (DiagramReset) ist ein neues Dokument: History verwerfen
+        // (User-Entscheidung 03.11., demo2-Semantik — dort rufe die Toolbar
+        // commandHistory().clear() von außen). Der Reset selbst wird NICHT
+        // als Undo-Op aufgezeichnet: nur die Subscriptions oben zählen.
+        bus.subscribe(DiagramEvent.DiagramReset.class, e -> clearHistory());
+
         // Eingaben als Gesten-Grenzen: schließen den laufenden Eintrag.
         bus.subscribe(InputEvent.class, this::onBoundary);
+    }
+
+    /** Leert Undo- und Redo-Stack sowie den laufenden Gesten-Eintrag. */
+    private void clearHistory() {
+        undoStack.clear();
+        redoStack.clear();
+        pending = new ArrayList<>();
     }
 
     // ---------- Gesten-Grenzen ----------

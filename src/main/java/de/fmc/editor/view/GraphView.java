@@ -30,6 +30,7 @@ import javafx.scene.text.Font;
 import javafx.scene.text.TextAlignment;
 import javafx.scene.transform.Scale;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -260,6 +261,7 @@ public class GraphView {
         bus.subscribe(DiagramEvent.ObjectTextChanged.class,
                 e -> onObjectTextChanged(e.updated()));
         bus.subscribe(DiagramEvent.ObjectsRemoved.class, this::onObjectsRemoved);
+        bus.subscribe(DiagramEvent.DiagramReset.class, this::onDiagramReset);
 
         bus.subscribe(DiagramEvent.ConnectionEstablished.class,
                 e -> onConnectionAdded(e.connection()));
@@ -510,6 +512,46 @@ public class GraphView {
         liveConnections.values().forEach(connectionMapper::refresh);
     }
 
+    /** Vollständiger Neuaufbau nach dem Laden (DiagramReset): Bestand und
+     *  Gesten-Präsentation entsorgen, dann aus dem Fakt-Zustand aufbauen —
+     *  derselbe Pfad wie der Initial-Bestand im Konstruktor. EIN Fakt statt
+     *  hunderter ObjectAdded. Die View konvergiert hier gegen jeden
+     *  Kern-Pfad: Die UI verlässt nach dem Laden laufende Modi über
+     *  SelectTool(SELECT) — egal welche Aufräum-Hinweise dabei kommen (oder
+     *  nicht), dieser Handler ist die Garantie, dass nichts Altes hängen
+     *  bleibt. Die Selektion hat die View bereits per SelectionChanged
+     *  geleert bekommen (der Fakt erreicht Subscriber vor diesem Rebuild). */
+    private void onDiagramReset(DiagramEvent.DiagramReset event) {
+        for (UUID id : new ArrayList<>(objectNodes.keySet())) {
+            removeObjectNode(id);
+        }
+        for (UUID id : new ArrayList<>(liveConnections.keySet())) {
+            connectionMapper.remove(id);
+        }
+        liveConnections.clear();
+        selectedConnectionWaypointIds.clear();
+        hoveredConnectionId = null;
+        setWaypointsVisible(false); // Route-Fokus gehörte zum alten Dokument
+
+        // Gesten-Präsentation zurücksetzen (Vorschau, Band, Griffe).
+        previewSourceId = null;
+        previewWaypoints = List.of();
+        previewPath.getElements().clear();
+        previewPath.setVisible(false);
+        previewWaypointGroup.getChildren().clear();
+        bandRect.setVisible(false);
+        resizeModeTarget = null;
+        resizePreviewId = null;
+        handleGroup.getChildren().clear();
+
+        for (DiagramObject object : event.objects()) {
+            addObjectNode(object);
+        }
+        for (Connection conn : event.connections()) {
+            onConnectionAdded(conn);
+        }
+    }
+
     private void onConnectionAdded(Connection conn) {
         liveConnections.put(conn.id(), conn);
         connectionMapper.refresh(conn);
@@ -530,6 +572,19 @@ public class GraphView {
                     || conn.targetId().equals(objectId)
                     || conn.waypointIds().contains(objectId)) {
                 connectionMapper.refresh(conn);
+            }
+        }
+    }
+
+    /** Dasselbe mit Preview-Override für die Resize-Live-Vorschau: Die
+     *  Geometrie des gezogenen Objekts kommt aus dem Hinweis, nicht aus dem
+     *  (noch unveränderten) Modellstand. */
+    private void refreshConnectionsTouching(DiagramObject override, UUID objectId) {
+        for (Connection conn : liveConnections.values()) {
+            if (conn.sourceId().equals(objectId)
+                    || conn.targetId().equals(objectId)
+                    || conn.waypointIds().contains(objectId)) {
+                connectionMapper.refresh(conn, override);
             }
         }
     }
@@ -831,10 +886,12 @@ public class GraphView {
     }
 
     /** Live-Vorschau der Resize-Geste: Der Kern hat die Geometrie berechnet
-     *  (symmetrisch, Grid-Klemmung) — die View wendet sie nur an. Ende
-     *  (preview == null): Beim ABBRUCH kommt kein Fakt, die Geometrie muss
-     *  aus dem Modell wiederhergestellt werden; nach dem Commit hat der
-     *  ObjectResized-Fakt ohnehin schon gesetzt. */
+     *  (symmetrisch, Grid-Klemmung) — die View wendet sie auf Shape, Griffe
+     *  UND die berührenden Verbindungen an, damit die Pfeilspitze beim Ziehen
+     *  am gezogenen Rand klebt (User-Fund 09.11.). Ende (preview == null):
+     *  Beim ABBRUCH kommt kein Fakt, die Geometrie muss aus dem Modell
+     *  wiederhergestellt werden; nach dem Commit hat der ObjectResized-Fakt
+     *  ohnehin schon gesetzt. */
     private void onResizePreview(ActionEvent.ResizePreviewChanged event) {
         if (event.preview() == null) {
             if (resizePreviewId != null) {
@@ -844,6 +901,13 @@ public class GraphView {
                         updateObjectNode(node, obj);
                     }
                 });
+                // Pfeile aus dem MODELL herstellen: Während des Drags liefen
+                // die berührenden Verbindungen auf Preview-Geometrie. Nach dem
+                // Commit ist das idempotent (der ObjectResized-Fakt hat längst
+                // gesetzt), nach dem ESC-Abbruch ist es der zwingende Restore —
+                // das Modell hat sich nie geändert, die Pfeile dürfen nicht an
+                // der letzten Vorschau-Kante kleben bleiben.
+                refreshConnectionsTouching(resizePreviewId);
                 refreshHandles();
                 resizePreviewId = null;
             }
@@ -856,5 +920,10 @@ public class GraphView {
             handleGroup.getChildren().clear();
             drawHandles(event.preview());
         }
+        // Verbindungen an der PREVIEW-Geometrie ausrichten (Hinweis statt
+        // Modell-Fakt: kein Undo-Rauschen im Drag. demo2 löste das sichtbare
+        // Verhalten über Live-Registry-Mutation pro Drag-Segment — bewusst
+        // nicht kopiert, der Hinweis ist der demo3-Weg).
+        refreshConnectionsTouching(event.preview(), event.preview().id());
     }
 }

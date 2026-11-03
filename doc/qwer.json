@@ -1,0 +1,317 @@
+{
+  "objects": [
+    {
+      "id": "c6396631-a9c3-4835-811d-88cd8a1d7873",
+      "type": "CIRCLE",
+      "x": 200.0,
+      "y": 80.0,
+      "width": 40.0,
+      "height": 40.0,
+      "layerId": "00000000-0000-0000-0000-000000000000",
+      "label": ""
+    },
+    {
+      "id": "d958e404-ce74-4cec-a546-5ac8ac343a1b",
+      "type": "RECTANGLE",
+      "x": 200.0,
+      "y": 180.0,
+      "width": 136.0,
+      "height": 78.0,
+      "layerId": "00000000-0000-0000-0000-000000000000",
+      "content": "",
+      "centered": true
+    },
+    {
+      "id": "ebc00933-4c19-45a3-a2cd-1eea8f769448",
+      "type": "RECTANGLE",
+      "x": 200.0,
+      "y": 1000.0,
+      "width": 158.0,
+      "height": 106.0,
+      "layerId": "00000000-0000-0000-0000-000000000000",
+      "content": "",
+      "centered": true
+    },
+    {
+      "id": "18036929-db42-4a6d-b860-66e94e2efe12",
+      "type": "RECTANGLE",
+      "x": 200.0,
+      "y": 480.0,
+      "width": 146.0,
+      "height": 94.0,
+      "layerId": "00000000-0000-0000-0000-000000000000",
+      "content": "",
+      "centered": true
+    },
+    {
+      "id": "4219d5c0-50d2-4bc3-b0d9-e79b4e5a695e",
+      "type": "RECTANGLE",
+      "x": 200.0,
+      "y": 720.0,
+      "width": 148.0,
+      "height": 116.0,
+      "layerId": "00000000-0000-0000-0000-000000000000",
+      "content": "asdfqwerafs qwerfsdwer sadfqwerasd",
+      "centered": true
+    },
+    {
+      "id": "54a12229-9243-425a-a852-d8cfbaa5db90",
+      "type": "CIRCLE",
+      "x": 200.0,
+      "y": 320.0,
+      "width": 40.0,
+      "height": 40.0,
+      "layerId": "00000000-0000-0000-0000-000000000000",
+      "label": ""
+    },
+    {
+      "id": "ec4479ba-6e01-47e6-a452-eb29014fc783",
+      "type": "CIRCLE",
+      "x": 200.0,
+      "y": 580.0,
+      "width": 40.0,
+      "height": 40.0,
+      "layerId": "00000000-0000-0000-0000-000000000000",
+      "label": ""
+    },
+    {
+      "id": "8f6f0cab-ac60-4044-8490-42b3b1ad834b",
+      "type": "CIRCLE",
+      "x": 60.0,
+      "y": 860.0,
+      "width": 40.0,
+      "height": 40.0,
+      "layerId": "00000000-0000-0000-0000-000000000000",
+      "label": ""
+    },
+    {
+      "id": "4ab57ccd-b30f-4e0a-b041-a11adc8f0962",
+      "type": "CIRCLE",
+      "x": 340.0,
+      "y": 860.0,
+      "width": 40.0,
+      "height": 40.0,
+      "layerId": "00000000-0000-0000-0000-000000000000",
+      "label": "W"
+    },
+    {
+      "id": "a33873be-2b81-4492-b038-ec1fa57ff4b6",
+      "type": "WAYPOINT",
+      "x": 60.0,
+      "y": 720.0,
+      "width": 10.0,
+      "height": 10.0,
+      "layerId": "00000000-0000-0000-0000-000000000000"
+    },
+    {
+      "id": "ad15eaad-fa7f-4ae1-a18f-19f087e7902c",
+      "type": "WAYPOINT",
+      "x": 340.0,
+      "y": 720.0,
+      "width": 10.0,
+      "height": 10.0,
+      "layerId": "00000000-0000-0000-0000-000000000000"
+    },
+    {
+      "id": "4f0e8a53-e17d-4397-9a68-cf374081b365",
+      "type": "WAYPOINT",
+      "x": 60.0,
+      "y": 1000.0,
+      "width": 10.0,
+      "height": 10.0,
+      "layerId": "00000000-0000-0000-0000-000000000000"
+    },
+    {
+      "id": "5ad748a8-8367-48f0-9764-46c536500aa8",
+      "type": "WAYPOINT",
+      "x": 340.0,
+      "y": 1000.0,
+      "width": 10.0,
+      "height": 10.0,
+      "layerId": "00000000-0000-0000-0000-000000000000"
+    },
+    {
+      "id": "c4ae2242-8dcc-47db-b218-80d0e8c6fa49",
+      "type": "RECTANGLE",
+      "x": 420.0,
+      "y": 320.0,
+      "width": 168.76499094535234,
+      "height": 96.06622561504673,
+      "layerId": "00000000-0000-0000-0000-000000000000",
+      "content": "",
+      "centered": true
+    },
+    {
+      "id": "a3a74999-52dd-400b-a5b8-27d31a1814db",
+      "type": "WAYPOINT",
+      "x": 255.96719599986577,
+      "y": 289.68434826611434,
+      "width": 10.0,
+      "height": 10.0,
+      "layerId": "00000000-0000-0000-0000-000000000000"
+    },
+    {
+      "id": "79ab0971-3923-4bda-856b-7f18e67f0004",
+      "type": "WAYPOINT",
+      "x": 320.0,
+      "y": 180.0,
+      "width": 10.0,
+      "height": 10.0,
+      "layerId": "00000000-0000-0000-0000-000000000000"
+    },
+    {
+      "id": "0aae7808-9d8f-4be4-897e-d52feeabe2f0",
+      "type": "WAYPOINT",
+      "x": 420.0,
+      "y": 180.0,
+      "width": 10.0,
+      "height": 10.0,
+      "layerId": "00000000-0000-0000-0000-000000000000"
+    },
+    {
+      "id": "8fc82131-30ff-4e0e-b9ff-306c64be35f2",
+      "type": "WAYPOINT",
+      "x": 420.0,
+      "y": 460.0,
+      "width": 10.0,
+      "height": 10.0,
+      "layerId": "00000000-0000-0000-0000-000000000000"
+    },
+    {
+      "id": "6802c5f2-5c8b-4350-8784-a9d821499287",
+      "type": "WAYPOINT",
+      "x": 260.0,
+      "y": 340.0,
+      "width": 10.0,
+      "height": 10.0,
+      "layerId": "00000000-0000-0000-0000-000000000000"
+    },
+    {
+      "id": "9b4121fb-c06f-4dc4-bf52-5e299467afe3",
+      "type": "WAYPOINT",
+      "x": 340.0,
+      "y": 460.0,
+      "width": 10.0,
+      "height": 10.0,
+      "layerId": "00000000-0000-0000-0000-000000000000"
+    }
+  ],
+  "connections": {
+    "37bb2352-d22b-4bca-9716-c744f5313607": {
+      "sourceId": "c6396631-a9c3-4835-811d-88cd8a1d7873",
+      "targetId": "d958e404-ce74-4cec-a546-5ac8ac343a1b",
+      "waypointIds": [],
+      "layerId": "00000000-0000-0000-0000-000000000000"
+    },
+    "d39db8ef-1534-4ed6-b75b-e6fd39511c57": {
+      "sourceId": "d958e404-ce74-4cec-a546-5ac8ac343a1b",
+      "targetId": "54a12229-9243-425a-a852-d8cfbaa5db90",
+      "waypointIds": [],
+      "layerId": "00000000-0000-0000-0000-000000000000"
+    },
+    "2dc40294-ff9a-41c6-9e45-113455f65497": {
+      "sourceId": "54a12229-9243-425a-a852-d8cfbaa5db90",
+      "targetId": "18036929-db42-4a6d-b860-66e94e2efe12",
+      "waypointIds": [],
+      "layerId": "00000000-0000-0000-0000-000000000000"
+    },
+    "f848b23f-7094-47f0-b09b-1c2c089d244e": {
+      "sourceId": "18036929-db42-4a6d-b860-66e94e2efe12",
+      "targetId": "ec4479ba-6e01-47e6-a452-eb29014fc783",
+      "waypointIds": [],
+      "layerId": "00000000-0000-0000-0000-000000000000"
+    },
+    "abae12c4-5b92-45d0-b307-7ce03a0dfcee": {
+      "sourceId": "ec4479ba-6e01-47e6-a452-eb29014fc783",
+      "targetId": "4219d5c0-50d2-4bc3-b0d9-e79b4e5a695e",
+      "waypointIds": [],
+      "layerId": "00000000-0000-0000-0000-000000000000"
+    },
+    "e7d3af40-e1d5-4249-8eb0-f369be5bbda9": {
+      "sourceId": "4219d5c0-50d2-4bc3-b0d9-e79b4e5a695e",
+      "targetId": "8f6f0cab-ac60-4044-8490-42b3b1ad834b",
+      "waypointIds": [
+        "a33873be-2b81-4492-b038-ec1fa57ff4b6"
+      ],
+      "layerId": "00000000-0000-0000-0000-000000000000"
+    },
+    "8ec09819-30c0-4d5d-b903-2d066dc0bd25": {
+      "sourceId": "4219d5c0-50d2-4bc3-b0d9-e79b4e5a695e",
+      "targetId": "4ab57ccd-b30f-4e0a-b041-a11adc8f0962",
+      "waypointIds": [
+        "ad15eaad-fa7f-4ae1-a18f-19f087e7902c"
+      ],
+      "layerId": "00000000-0000-0000-0000-000000000000"
+    },
+    "0506f491-8094-4603-a8bc-1fb37e9dbe97": {
+      "sourceId": "4ab57ccd-b30f-4e0a-b041-a11adc8f0962",
+      "targetId": "ebc00933-4c19-45a3-a2cd-1eea8f769448",
+      "waypointIds": [
+        "5ad748a8-8367-48f0-9764-46c536500aa8"
+      ],
+      "layerId": "00000000-0000-0000-0000-000000000000"
+    },
+    "1364bf8d-599a-460b-8bfe-8404172c5fd6": {
+      "sourceId": "8f6f0cab-ac60-4044-8490-42b3b1ad834b",
+      "targetId": "ebc00933-4c19-45a3-a2cd-1eea8f769448",
+      "waypointIds": [
+        "4f0e8a53-e17d-4397-9a68-cf374081b365"
+      ],
+      "layerId": "00000000-0000-0000-0000-000000000000"
+    },
+    "cc34b358-7131-4800-af27-194372b71258": {
+      "sourceId": "54a12229-9243-425a-a852-d8cfbaa5db90",
+      "targetId": "c4ae2242-8dcc-47db-b218-80d0e8c6fa49",
+      "waypointIds": [
+        "a3a74999-52dd-400b-a5b8-27d31a1814db",
+        "79ab0971-3923-4bda-856b-7f18e67f0004",
+        "0aae7808-9d8f-4be4-897e-d52feeabe2f0"
+      ],
+      "layerId": "00000000-0000-0000-0000-000000000000"
+    },
+    "cc9050bd-20a6-4c3c-92c9-801b4eb75623": {
+      "sourceId": "c4ae2242-8dcc-47db-b218-80d0e8c6fa49",
+      "targetId": "54a12229-9243-425a-a852-d8cfbaa5db90",
+      "waypointIds": [
+        "8fc82131-30ff-4e0e-b9ff-306c64be35f2",
+        "9b4121fb-c06f-4dc4-bf52-5e299467afe3",
+        "6802c5f2-5c8b-4350-8784-a9d821499287"
+      ],
+      "layerId": "00000000-0000-0000-0000-000000000000"
+    }
+  },
+  "layers": [
+    {
+      "id": "00000000-0000-0000-0000-000000000000",
+      "name": "Standard",
+      "visible": true
+    },
+    {
+      "id": "11111111-1111-1111-1111-111111111111",
+      "name": "Wegpunkte",
+      "visible": false
+    }
+  ],
+  "texts": [
+    {
+      "id": "260b679a-814d-4367-8a75-bf0b95b55d6a",
+      "text": "asdf asdf asdf aasdf asdf asdf as",
+      "x": 380.0,
+      "y": 640.0,
+      "width": 140.0,
+      "height": 60.0,
+      "parentObjectId": "4219d5c0-50d2-4bc3-b0d9-e79b4e5a695e",
+      "layerId": "00000000-0000-0000-0000-000000000000"
+    },
+    {
+      "id": "e7505bdd-4910-4c67-a7c1-eaf6491961d1",
+      "text": "asdf asdf asdf asd asdf asdf asd asdf sdf ",
+      "x": 540.0,
+      "y": 640.0,
+      "width": 140.0,
+      "height": 60.0,
+      "parentObjectId": "4219d5c0-50d2-4bc3-b0d9-e79b4e5a695e",
+      "layerId": "00000000-0000-0000-0000-000000000000"
+    }
+  ]
+}
