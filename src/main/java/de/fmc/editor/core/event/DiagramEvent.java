@@ -49,4 +49,14 @@ public sealed interface DiagramEvent extends DomainEvent {
     /** Bestehen gebliebene Connections, deren Waypoint-Listen gestrichen wurden —
      *  previous und updated laufen index-parallel; previous macht den Fakt invertierbar. */
     record ConnectionsUpdated(List<Connection> previous, List<Connection> updated) implements DiagramEvent {}
+
+    /** Vollständiger Ersatz des Modellbestands durch Laden (Restore-Pfad):
+     *  objects (z-Ordnung, Texte oben auf) + connections = der komplette
+     *  NACH-Zustand. Die View baut daraus in EINEM Fakt neu auf statt
+     *  hunderter ObjectAdded; Selection- und UndoService leeren sich auf
+     *  diesen Fakt selbst (User-Entscheidung 03.11.: Datei öffnen = neues
+     *  Dokument — History verwerfen, demo2-Semantik). Bewusst KEIN Undo-
+     *  Träger: Der Fakt ersetzt ein Dokument, er invertiert keine Geste.
+     *  Namensfolge von demo2s RegistryReset. */
+    record DiagramReset(List<DiagramObject> objects, List<Connection> connections) implements DiagramEvent {}
 }

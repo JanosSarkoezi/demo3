@@ -45,6 +45,18 @@ public class SelectionService implements SelectionQuery {
         // nie selbst in der Anfrage stand.
         bus.subscribe(DiagramEvent.ObjectsRemoved.class, this::onObjectsRemoved);
         bus.subscribe(DiagramEvent.ConnectionsRemoved.class, this::onConnectionsRemoved);
+        // Laden (DiagramReset) leert die Auswahl — die IDs des alten
+        // Dokuments existieren nicht mehr. Identische (leere) Auswahl
+        // feuert KEINEN Fakt, wie überall.
+        bus.subscribe(DiagramEvent.DiagramReset.class, e -> clearSelection());
+    }
+
+    private void clearSelection() {
+        if (selection.isEmpty()) {
+            return;
+        }
+        selection = List.of();
+        publishFact(new DiagramEvent.SelectionChanged(selection));
     }
 
     private void onSetSelection(ActionEvent.SetSelection event) {

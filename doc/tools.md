@@ -13,6 +13,7 @@ steht, was die Hand am Mauszeiger tut.)
 | Toolbar | Demo2-Look; KEIN Select-Button — kein aktiver Toggle bedeutet SELECT |
 | Undo/Redo | **CTRL+Z** macht die letzte Geste rückgängig (pro Geste genau EIN Schritt, inkl. Lösch-Kaskade); **SHIFT+CTRL+Z** / **CTRL+Y** wiederholt; jede neue Aktion leert die Redo-Historie |
 | Löschen | **DEL** löscht ausschließlich die aktuelle Auswahl — nie „unter dem Cursor" |
+| Speichern/Laden | Toolbar-Sektion „Datei" oder **CTRL+S** / **CTRL+O**: JSON-Datei im demo2-Format (FileChooser, nur „Speichern unter" — kein gemerkter Pfad). Laden ERSETZT das ganze Diagramm ohne Undo-Rückweg (Datei öffnen = neues Dokument): Auswahl und Undo-Historie beginnen frisch, laufende Modi enden. Alte demo2-Dateien laden weiterhin; fehlerhafte Dateien zeigen einen Alert und lassen das aktuelle Diagramm unangetastet |
 | Snap-to-Grid | Toolbar-Feld „Snap to Grid": freier Zahlenwert (> 0, Komma erlaubt); Commit bei ENTER oder Fokus-Verlust, ungültige Eingabe stellt still auf den letzten gültigen Wert zurück. Das Netz ist IMMER aktiv, wirkt sofort (Snapping + Resize-Mindestgröße = 1 Zelle) und wird nicht gespeichert |
 | Fokus | Jeder Klick auf die Zeichenfläche holt den Tastatur-Fokus zurück — Shortcuts leben nur auf der Fläche |
 

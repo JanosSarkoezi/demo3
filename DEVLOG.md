@@ -3,6 +3,73 @@
 Chronik der Arbeitssessions — die neuesten Einträge stehen OBEN. Format: Datum / Was / Warum so / Grenzen & Verbesserungskandidaten.
 (Die aktuelle Architektur-Wahrheit steht in der AGENTS.md — hier nur Entscheidungen und ihre Begründung.)
 
+## 03.11.2026 (19. Arbeitsblock) — Speichern & Laden (Persistenz)
+
+**Was:**
+
+- Speichern/Laden im demo2-JSON-Format (Kompatibilitätskontrakt, Beispiel in
+  `doc/spec.md`): Toolbar-Sektion „Datei" (Speichern…/Laden…) + CTRL+S/CTRL+O.
+- Kern zuerst (`core.persistence`, JavaFX-frei): DTOs mit demo2-Feldnamen
+  (`PersistedObject` uniforme Bounding-Box + Typ, `PersistedText` als
+  text/parentObjectId wie demo2s FmcText, plus demo3-Erweiterungen label/
+  content/centered/height/anchor), `DiagramCodec` (Kern ↔ DTO: Radius ↔
+  Durchmesser, fehlende Felder → demo3-Defaults, defekte Einträge still
+  übersprungen), `PersistenceService` (Gson, Pretty-Printing).
+- Lade-Schreibpfad über den Bus: `LoadDiagram`-Request → DiagramService
+  ersetzt beide Stores OHNE Validierung → EIN `DiagramReset`-Fakt mit
+  vollem Nach-Zustand. Undo- und SelectionService abonnieren den Fakt und
+  leeren sich selbst; die View baut aus dem einen Fakt komplett neu auf
+  (inkl. defensivem Gesten-Reset). Danach `SelectTool(SELECT)` von der UI —
+  Modi des alten Dokuments enden.
+- Speichern = Lesewissen über die Query (wie Hover), kein Bus-Request;
+  nur „Speichern unter" ohne gemerkten Pfad. Fehler als Alert statt
+  demo2s printStackTrace; Lade-Fehler lässt das alte Dokument unangetastet.
+- `PersistenceTest` (5 Tests): Gson-Roundtrip mit vollem Modell inkl.
+  Anker, demo2-Fixture aus der spec lädt 1:1, Reset leert Auswahl +
+  History, Toleranz, malformed JSON wirft. **184 Tests grün** (vorher 179).
+- Doku: AGENTS.md (Abschnitte 2, 3, 4, 8, 9, Geplant — offene x/y-Frage
+  als beantwortet dokumentiert), hier.
+
+**Warum so:**
+
+- Legacy-Oracle-Mining vor dem Bau: demo2s `ShapeViewMapper` bewies, dass
+  x/y im Format der MITTELPUNKT ist (nicht Ecke-oben-links, wie die offene
+  Frage in der AGENTS.md vermutete) — demo3s Modellkonvention passt 1:1,
+  null Koordinaten-Konvertierung nötig.
+- Laden ohne Validierung ist Absicht, kein Schlupfloch: ConnectionRules
+  prüfen NEUE Verbindungen; eine ältere Datei mit heute verbotener
+  Verbindung muss trotzdem laden (Restore ≠ Erzeugen). demo2 praktizierte
+  das implizit über direktes Store-Schreiben — demo3 macht es explizit als
+  eigenen Request+ Fakt, weil der Bus der einzige Schreibpfad ist.
+- EIN `DiagramReset` statt hunderter ObjectAdded: Die View braucht den
+  Neuaufbau ohnehin atomar, Undo („Datei öffnen = neues Dokument", User-
+  Entscheidung) und Selection leeren sich per Subscription — niemand wird
+  von außen angerufen (demo2 rief commandHistory().clear() von der Toolbar:
+  Warze, nicht kopiert).
+- Export in z-Ordnung aus der zOrder-Liste: demo2 exportierte
+  objects.values() einer Map — Reihenfolge zufällig, nicht kopiert.
+- Feldnamen text/parentObjectId statt content/ownerId im DTO: Altvorlagen-
+  Dateien behalten ihre Text-Zuordnung; die Kerndomäne bleibt unberührt
+  (Abbildung nur am Codec-Rand).
+- Main nutzt jetzt `PersistedLayers.STANDARD_LAYER_ID` als Default-Ebene:
+  Gespeicherte Dateien referenzieren dieselbe „Standard"-ID, die der
+  layers-Abschnitt definiert.
+
+**Grenzen & Verbesserungskandidaten:**
+
+- Texte laden OBEN auf die z-Ordnung (demo2-Semantik: separater
+  texts-Abschnitt ohne z-Position). Kaum sichtbar (Label liegen meist
+  ohnehin oben), aber ein echter Roundtrip-Unterschied bei verdeckenden
+  Objekten. Fix später: z-Index-Feld im texts-Abschnitt oder Mitführen der
+  Position im objects-Array.
+- Layers-Abschnitt ist Fixliste (Standard/Wegpunkte) bis das Layer-System
+  existiert; Layer-Definitionen fremder Dateien gehen beim Re-Speichern
+  verloren.
+- Kein visueller Smoke-Test der FileChooser-Flows (headless nicht machbar);
+  Kern-Logik ist über PersistenceTest vollständig abgedeckt.
+- Demo2-Texte mit Styling-Feldern (fontFamily etc.) laden mit Inhalt und
+  Position, verlieren aber ihr Styling (demo3 hat keins) und height=0.
+
 ## 03.11.2026 (18. Arbeitsblock) — Verbindungs-Selektion & -Löschung
 
 **Was:**

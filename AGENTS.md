@@ -7,9 +7,11 @@ strikte Trennung zwischen Interaktionslogik (Core) und späterer UI (JavaFX).
 > **Wichtig:** Die UI-Schicht läuft und ist über „Erstes Licht" (30.10.)
 > hinaus: seit 02.11. mit vollständigem Inline-Text-Editor (freier Text,
 > externes K/R-Label, K-Buchstabe, R-Inhalt, Verbindungs-Label — Stufe
-> A/B/C, siehe Abschnitt 9). Offen: „Zentriert"-Schalter-UI (User hat eigene
-> Ideen), Layer-System, Persistenz — Details unter „Geplant / fehlt noch";
-> dort stehende Klassennamen sind **Ziel-Vision, nicht Realität**.
+> A/B/C, siehe Abschnitt 9), seit 03.11. mit Speichern/Laden (JSON im
+> demo2-Format, siehe Abschnitt 3 „Persistenz"). Offen: „Zentriert"-
+> Schalter-UI (User hat eigene Ideen), Layer-System — Details unter
+> „Geplant / fehlt noch"; dort stehende Klassennamen sind **Ziel-Vision,
+> nicht Realität**.
 
 ---
 
@@ -52,11 +54,13 @@ Modus — zugleich Abhakliste für den visuellen Smoke-Test). Kernanforderungen:
   (je ein `ObjectAdded`-Fakt); die Connection hält nur die IDs.
 * **Circle-Speicherung — typisiertes Modell behalten:** JSON nutzt
   width/height, weil demo2 EIN `FmcObject`-Record mit Bounding-Box für alle
-  Typen nutzte. Empfehlung: Das sealed, typisierte Modell behalten
-  (compiler-erzwungene Exhaustivität statt Enum-Switches) und am
-  Serialisierungsrand per DTO konvertieren (`Circle.radius` ↔ width/height =
-  Durchmesser). Offen: ob x/y im Format Ecke-oben-links ist (Modell rechnet
-  resize-seitig zentriert).
+  Typen nutzte. ✅ Implementiert (03.11.): Das sealed, typisierte Modell
+  blieb; der `DiagramCodec` (`core.persistence`) konvertiert am
+  Serialisierungsrand (`Circle.radius` ↔ width/height = Durchmesser).
+  **Beantwortet** (demo2-Beweis über den `ShapeViewMapper`: `Circle(obj.x(),
+  obj.y(), w/2)`, Rechteck bei `x − w/2`): x/y im Format ist der
+  MITTELPUNKT — identisch zur demo3-Modellkonvention, keinerlei
+  Koordinaten-Konvertierung nötig.
 
 ---
 
@@ -123,7 +127,9 @@ drei Zweigen:
   `UpdateText` (nur Inhalt/Box), `SetAnchor` (nullable TextAnchor — null =
   Anker lösen, Position bleibt), `AddAnchoredText` (Service leitet x/y aus
   dem Anker ab), `RequestUndo` /
-  `RequestRedo` (UI übersetzt CTRL+Z / SHIFT+CTRL+Z hierher).
+  `RequestRedo` (UI übersetzt CTRL+Z / SHIFT+CTRL+Z hierher),
+  `LoadDiagram` (Persistenz-Restore: kompletter Bestand in z-Ordnung +
+  Connections mit Original-IDs — ohne Validierung, siehe Abschnitt 3).
 * **UI-Intents auf dem Bus:** `EditTextOfObject` (innerer Text K/R), `EditText`
   (bestehendes Text-Objekt), `CreateTextFor` (ownerId null = freier Text),
   `CreateConnectionText` (mit projiziertem Anker). Das Text-Werkzeug
@@ -140,7 +146,10 @@ drei Zweigen:
   `ConnectionRejected` (mit Begründung), `SelectionChanged`; plus
   Batch-Fakten einer Lösch-Geste mit vollständigem Zustand (Undo-Grundlage):
   `ObjectsRemoved` (inkl. kaskadierter Waypoints), `ConnectionsRemoved`,
-  `ConnectionsUpdated` (previous + updated index-parallel). **Design-Regel:
+  `ConnectionsUpdated` (previous + updated index-parallel); plus
+  `DiagramReset` (vollständiger Ersatz durch Laden: objects + connections =
+  kompletter Nach-Zustand; bewusst KEIN Undo-Träger — Undo- und
+  SelectionService leeren sich auf diesen Fakt selbst). **Design-Regel:
   Ein Modell-Fakt ist genau dann undo-fähig, wenn er den vollständigen
   Vor-Zustand trägt.** Daran dockt die spätere UI an.
 
@@ -208,6 +217,27 @@ Bus ↔ Service: `new DiagramService()` → `new InteractionEventBus(service, �
   nächstgelegene Connection gewinnt), `projectOntoConnection(connectionId, x, y)` →
   `TextAnchor` (Offset = Klick − Ankerpunkt: Das Label sitzt, wo geklickt
   wurde — Kreation frei, Snapping greift erst beim Verschieben).
+* **Persistenz — Laden als Restore (03.11.):** Paket `core.persistence`
+  (JavaFX-frei): DTOs (`PersistedDiagram/Object/Text/Connection/Layer`,
+  Feldnamen = demo2-Kontrakt), `DiagramCodec` (Abbildung Kern ↔ DTO:
+  Durchmesser-Konvertierung, fehlende Felder alter Dateien → demo3-Defaults,
+  fehlende layerId → Standard-Ebene, defekte Einträge still übersprungen),
+  `PersistenceService` (Gson, Pretty-Printing; Fehler propagieren — das
+  Surface ist der UI-Alert, nie printStackTrace). Der Lade-Schreibpfad läuft
+  über den Bus: `LoadDiagram`-Request → DiagramService ersetzt beide Stores
+  **ohne Validierung** (ConnectionRules prüfen NEUE Verbindungen — eine
+  ältere Datei mit heute verbotener Verbindung muss trotzdem laden; demo2
+  umging die Validierung genauso) und publiziert EINEN `DiagramReset`-Fakt
+  mit vollständigem Nach-Zustand. Undo- und SelectionService abonnieren den
+  Fakt und leeren sich selbst (demo2 rief seine History von der Toolbar aus
+  — nicht kopieren). Export = Lesewissen über die Query in
+  z-Ordnung (deterministisch; demo2 exportierte Map-Reihenfolge: nicht
+  kopieren). **Format-Grenze (bewusst, demo2-Semantik):** Texte leben im
+  eigenen texts-Abschnitt ohne z-Position und laden deshalb OBEN auf die
+  z-Ordnung. Layers-Abschnitt: die zwei Default-Ebenen („Standard"/
+  „Wegpunkte", IDs aus spec.md) werden als Fixliste mitgeschrieben,
+  tolerant gelesen — bis das Layer-System existiert. `PersistedLayers.
+  STANDARD_LAYER_ID` ist zugleich Produkt-Default (Main).
 * **Move-Mengen-Query** `findMoveSet(basisIds)` (Default auf `DiagramQuery`,
   überschrieben im Service): die effektive Move-Menge ist eine reine Funktion
   der Auswahl-Basis — Basis selbst + externe Label + Waypoints
@@ -228,7 +258,8 @@ Bus ↔ Service: `new DiagramService()` → `new InteractionEventBus(service, �
   Invariante „keine toten IDs": Der Service abonniert `ObjectsRemoved` UND
   `ConnectionsRemoved` und staubt gelöschte IDs automatisch heraus (letztere
   auch für die Endpunkt-Kaskade, bei der die Verbindung nie selbst in der
-  Anfrage stand). Identische Mengen feuern KEINEN
+  Anfrage stand); `DiagramReset` (Laden) leert die Auswahl komplett.
+  Identische Mengen feuern KEINEN
   Fakt (Plain-Press auf bereits Selektiertes kollabiert die Auswahl nicht
   und rauscht nicht).
 * **`UndoService`** (`core.service`): Sitzungs-Undo/Redo über den Bus —
@@ -238,7 +269,10 @@ Bus ↔ Service: `new DiagramService()` → `new InteractionEventBus(service, �
   KeyPressed sind Grenzen; MouseDragged bewusst nicht, damit Move-Segmente
   verschmelzen), fährt einen Replay-Guard gegen Selbst-Erfassung und leert
   den Redo-Stack bei neuen Aktionen. Kamera- und Auswahl-Fakten bleiben
-  bewusst draußen (Sitzungszustand, kein Modellinhalt).
+  bewusst draußen (Sitzungszustand, kein Modellinhalt). Auf `DiagramReset`
+  (Laden) verwirft der Service die komplette History — Datei öffnen =
+  neues Dokument (User-Entscheidung 03.11., demo2-Semantik); der Reset
+  selbst wird nie als Undo-Op aufgezeichnet.
   * **TextChanged-Op:** `ObjectTextChanged` → Op mit previous/updated; Merge
     bei aufeinanderfolgenden Änderungen desselben Objekts (Re-Ankerung in
     Drag-Segmenten = EIN Undo-Punkt). Inverse wie Replay laufen mechanisch
@@ -440,21 +474,32 @@ Werte bleiben still ignoriert, neue Zelle = neue Resize-Mindestgröße),
 nur die Connection-ID, CTRL+Klick = Modus, Drag = No-Op,
 Move-Mengen-Reinheit bei gemischter Auswahl — das Verbindungs-Label wird
 nie Move-Basis —, DEL-Kaskade mit Endpunkt-Erhalt + Undo,
-Auswahl-Stauben über ConnectionsRemoved), `UiSessionIntentsTest`
+Auswahl-Stauben über ConnectionsRemoved), `PersistenceTest` (03.11.) die
+Persistenz als reinen Event-Flow (Gson-Roundtrip über String mit vollem
+Modell inkl. Anker, demo2-Format-Fixture aus doc/spec.md lädt 1:1 —
+Radius aus Durchmesser, fehlende Felder → demo3-Defaults; DiagramReset
+ersetzt komplett, leert Auswahl + Undo-History; defekte Einträge/leere
+Abschnitte tolerant; malformed JSON wirft statt still zu laden),
+`UiSessionIntentsTest`
 die State→UI-Hinweise und Initial-Queries, `BusTestSupport` ist der geteilte
-Test-Rahmen — **179 Tests gesamt, alle grün**.
+Test-Rahmen — **184 Tests gesamt, alle grün**.
 **Jedes neue Interaktions-Feature bekommt einen solchen Event-basierten Test.**
 
-### 9. UI-Schicht („Erstes Licht" 30.10. → Inline-Editor Stufe A/B/C 02.11.)
+### 9. UI-Schicht („Erstes Licht" 30.10. → Inline-Editor 02.11. → Persistenz 03.11.)
 * **`Main`** (`de.fmc.editor`): Bootstrap in Produktions-Reihenfolge —
   Services + Bus konstruieren, DANACH `attachTo` (Zirkularität, identisch
-  zu `BusTestSupport`), danach View/Toolbar/Übersetzer verdrahten,
-  `requestFocus` auf die Zeichenfläche. Start: `mvn javafx:run`.
+  zu `BusTestSupport`), danach View/PersistenceController/Toolbar/Übersetzer
+  verdrahten, `requestFocus` auf die Zeichenfläche. Default-Ebene =
+  `PersistedLayers.STANDARD_LAYER_ID` (Dateien einheitlich). Start:
+  `mvn javafx:run`.
 * **`ui`-Paket (Systemrand):** `InputEventTranslator` übersetzt JavaFX-Events
   in `InputEvent`s (immer SCREEN-Koordinaten — die Welt-Umrechnung macht der
   Kern über `CameraInfo`). CTRL+Z → `RequestUndo`, CTRL+Y / CTRL+SHIFT+Z →
   `RequestRedo` als DIREKTE ActionEvents: `CustomKeyCode` kennt Z/Y bewusst
-  nicht. **Ziel-Greife** (User-Fund 02.11.): Der Übersetzer fasst nur Events
+  nicht. CTRL+S/CTRL+O (03.11.) sind dagegen reine UI-Flows (FileChooser) —
+  der Übersetzer greift sie am Systemrand ab und reicht sie an den
+  `PersistenceController` durch, es gibt dafür bewusst keine Core-Events.
+  **Ziel-Greife** (User-Fund 02.11.): Der Übersetzer fasst nur Events
   an, deren ZIEL der Canvas-Root selbst ist — der Inline-Editor ist ein Kind
   des Root, seine Tasten und Klicks liefen sonst durch die Capture-Phase in
   den Kern (Werkzeug-Buchstaben wechselten das Tool, CTRL+Z/ESC leakten).
@@ -462,7 +507,9 @@ Test-Rahmen — **179 Tests gesamt, alle grün**.
   `UiMouseState` hält die Mausposition (Sitzungszustand der UI).
   `ToolbarController`: reiner Publisher (`SelectTool`, `RequestUndo/Redo`,
   `SetGridSize`), Sync über `ToolChanged`; KEIN Select-Button (kein aktiver
-  Toggle = SELECT, demo2-Stil); Sektion „Snap to Grid" mit freiem numerischem
+  Toggle = SELECT, demo2-Stil); Sektion „Datei" mit Speichern/Laden-Buttons
+  (Actions durchgereicht aus dem `PersistenceController` — die Toolbar hat
+  keinen Datei-Zugriff); Sektion „Snap to Grid" mit freiem numerischem
   Eingabefeld (Validierung: Zahl > 0, Komma erlaubt; ungültige Eingabe stellt
   auf den letzten gültigen Wert zurück; Commit bei ENTER und Fokus-Verlust);
   alle Controls `setFocusTraversable(false)` — Shortcuts bleiben auf der
@@ -472,6 +519,16 @@ Test-Rahmen — **179 Tests gesamt, alle grün**.
   holt den Fokus aktiv zurück (`InputEventTranslator.onMousePressed` —
   JavaFX-Regionen übernehmen ihn beim Klick nicht von selbst). Ohne dies
   erreichten ESC/DEL/Shortcuts den Übersetzer nie wieder.
+* **`PersistenceController` (03.11.):** Speichern & Laden am Systemrand.
+  Speichern = Lesewissen über die Query (wie Hover): FileChooser →
+  `DiagramCodec.export` → `PersistenceService.saveDiagram`. Laden =
+  Schreibpfad über den Bus: Datei → `PersistenceService.loadDiagram` →
+  `DiagramCodec.toLoadRequest` → `LoadDiagram`-Request; danach
+  `SelectTool(SELECT)`, damit Modi des alten Dokuments (RouteEditMode/
+  ResizeMode/Connecting) enden. Fehler (IO, malformed JSON) als Alert —
+  demo2 warf printStackTrace und lief still weiter (nicht kopieren); bei
+  Lade-Fehler bleibt das alte Dokument unangetastet. Nur „Speichern unter"
+  (User-Entscheidung 03.11.): kein gemerkter Datei-Pfad.
 * **`InlineTextEditorController` (Stufe A + B + C, 02.11. — komplett):** Der
   Konsument der Text-Werkzeug-Intents — öffnet den Editor-Overlay im
   BILDSCHIRM-Raum des Root
@@ -629,12 +686,18 @@ Beim Umsetzen dieser Features die obigen Goldenen Regeln einhalten:
     Position leitet der Service aus dem projizierten Anker ab — Drag
     re-ankert, Ketten-Verformungen gleiten über das W-Gleiten). Offen:
     „Zentriert"-Schalter-UI (User hat eigene Ideen).
-  * **Serialisierung:** `Text`/`label`/`content` ins DTO (Persistence-Block
-    unten), EINE Auswahl-Menge statt demo2s zwei parallelen Sets ist bereits
-    durch das UUID-basierte SelectionService-Design gewährleistet.
-* **Persistenz/Serialisierung:** JSON-Format = demo2s Gson-Export (Beispiel:
-  `doc/spec.md`), plus `texts`; DTO an der Serialisierungsgrenze konvertiert
-  (`Circle.radius` ↔ width/height), Connections per `waypointIds`.
+  * **Serialisierung:** ✅ (03.11.) `Text`/`label`/`content`/`anchor` sind im
+    DTO (`PersistedText` mit demo2-Feldnamen text/parentObjectId für
+    Altvorlagen-Kompatibilität); EINE Auswahl-Menge statt demo2s zwei
+    parallelen Sets war bereits durch das UUID-basierte SelectionService-
+    Design gewährleistet.
+* **Persistenz/Serialisierung:** ✅ Implementiert (03.11.) — Speichern
+  („Speichern unter", CTRL+S) & Laden (CTRL+O) im demo2-JSON-Format
+  (Beispiel: `doc/spec.md`) plus `texts`; DTO-Abbildung im `DiagramCodec`
+  (`Circle.radius` ↔ width/height = Durchmesser), Connections per
+  `waypointIds`, Export in z-Ordnung. Details: Abschnitt 3 „Persistenz"
+  und Abschnitt 9 (`PersistenceController`). Offen: Layer-System (der
+  layers-Abschnitt wird mit Fixliste geschrieben, bis es existiert).
 
 ### ✅ Entschiedene Fragen (beantwortet über die Altvorlage `../demo2`)
 

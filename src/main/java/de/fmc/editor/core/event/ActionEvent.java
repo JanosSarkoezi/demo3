@@ -172,6 +172,22 @@ public sealed interface ActionEvent extends DomainEvent {
     record RequestRedo() implements ActionEvent {
     }
 
+    // --- Persistenz: Laden (Restore-Pfad, kein Erzeugen) ---
+
+    /** Ersetzt das GESAMTE Diagramm durch den geladenen Bestand. objects
+     *  liegt in z-Ordnung vor (Index 0 = unten; Texte oben auf — sie leben
+     *  im eigenen texts-Abschnitt ohne z-Position, demo2-Semantik),
+     *  connections mit Original-IDs.
+     *
+     *  Bewusst OHNE Validierung: ConnectionRules prüfen NEUE Verbindungen —
+     *  eine ältere Datei mit heute verbotener Verbindung muss trotzdem
+     *  laden (Restore, demo2 umging die Validierung ebenso). Der
+     *  DiagramService bestätigt mit EINEM DiagramReset-Fakt; UndoService
+     *  leert darauf die History, SelectionService die Auswahl — per
+     *  Subscriptions, ohne dass der Loader sie anrufen müsste. */
+    record LoadDiagram(List<DiagramObject> objects, List<Connection> connections) implements ActionEvent {
+    }
+
     // --- State→UI-Hinweise (Sitzungszustand, KEINE Modell-Fakten: nicht
     // undo-fähig, vom UndoService bewusst ignoriert — wie Kamera/Selektion).
     // Die Richtung ist die gleiche wie bei den Editor-Intents oben: Der Kern

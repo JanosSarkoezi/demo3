@@ -30,6 +30,7 @@ import javafx.scene.text.Font;
 import javafx.scene.text.TextAlignment;
 import javafx.scene.transform.Scale;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -260,6 +261,7 @@ public class GraphView {
         bus.subscribe(DiagramEvent.ObjectTextChanged.class,
                 e -> onObjectTextChanged(e.updated()));
         bus.subscribe(DiagramEvent.ObjectsRemoved.class, this::onObjectsRemoved);
+        bus.subscribe(DiagramEvent.DiagramReset.class, this::onDiagramReset);
 
         bus.subscribe(DiagramEvent.ConnectionEstablished.class,
                 e -> onConnectionAdded(e.connection()));
@@ -508,6 +510,46 @@ public class GraphView {
         // ConnectionsUpdated-Fakt — hier reicht ein defensiver Refresh aller
         // noch lebender Verbindungen (der Mapper überspringt Fehlendes still).
         liveConnections.values().forEach(connectionMapper::refresh);
+    }
+
+    /** Vollständiger Neuaufbau nach dem Laden (DiagramReset): Bestand und
+     *  Gesten-Präsentation entsorgen, dann aus dem Fakt-Zustand aufbauen —
+     *  derselbe Pfad wie der Initial-Bestand im Konstruktor. EIN Fakt statt
+     *  hunderter ObjectAdded. Die View konvergiert hier gegen jeden
+     *  Kern-Pfad: Die UI verlässt nach dem Laden laufende Modi über
+     *  SelectTool(SELECT) — egal welche Aufräum-Hinweise dabei kommen (oder
+     *  nicht), dieser Handler ist die Garantie, dass nichts Altes hängen
+     *  bleibt. Die Selektion hat die View bereits per SelectionChanged
+     *  geleert bekommen (der Fakt erreicht Subscriber vor diesem Rebuild). */
+    private void onDiagramReset(DiagramEvent.DiagramReset event) {
+        for (UUID id : new ArrayList<>(objectNodes.keySet())) {
+            removeObjectNode(id);
+        }
+        for (UUID id : new ArrayList<>(liveConnections.keySet())) {
+            connectionMapper.remove(id);
+        }
+        liveConnections.clear();
+        selectedConnectionWaypointIds.clear();
+        hoveredConnectionId = null;
+        setWaypointsVisible(false); // Route-Fokus gehörte zum alten Dokument
+
+        // Gesten-Präsentation zurücksetzen (Vorschau, Band, Griffe).
+        previewSourceId = null;
+        previewWaypoints = List.of();
+        previewPath.getElements().clear();
+        previewPath.setVisible(false);
+        previewWaypointGroup.getChildren().clear();
+        bandRect.setVisible(false);
+        resizeModeTarget = null;
+        resizePreviewId = null;
+        handleGroup.getChildren().clear();
+
+        for (DiagramObject object : event.objects()) {
+            addObjectNode(object);
+        }
+        for (Connection conn : event.connections()) {
+            onConnectionAdded(conn);
+        }
     }
 
     private void onConnectionAdded(Connection conn) {
