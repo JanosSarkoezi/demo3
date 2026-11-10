@@ -3,6 +3,215 @@
 Chronik der Arbeitssessions — die neuesten Einträge stehen OBEN. Format: Datum / Was / Warum so / Grenzen & Verbesserungskandidaten.
 (Die aktuelle Architektur-Wahrheit steht in der AGENTS.md — hier nur Entscheidungen und ihre Begründung.)
 
+## 17.11.2026 (24. Arbeitsblock) — Bugfix: Griff-Hit-Test liest das Ziel frisch (Undo von Move/Resize im Resize-Modus)
+
+**Was:**
+
+- User-Fund, gleiche Session wie Arbeitsblock 23: Objekt erstellen,
+  bewegen, Doppelklick (Resize-Modus), CTRL+Z — die Griffe waren SICHTBAR,
+  aber nicht greifbar. Variante ohne Move ebenfalls latent: Undo eines
+  Resizes im Modus.
+- Ursache (andere Familie als Block 23 — das Objekt lebt): Die View
+  frischt ihre Griffe auf `ObjectMoved`/`ObjectResized` per `findById`
+  auf (`refreshHandles`), der Kern hitestete aber gegen das unveränderliche
+  Entry-Record des `ResizeModeState` mit der Alt-Geometrie. Klick auf die
+  sichtbaren Griffe verfehlte → galt als „Klick daneben" → Modus verließ
+  sich still. Der 30.10.-Fresh-Read-Fix griff nur auf dem Rückkehrpfad
+  nach dem eigenen Commit, nicht für externe Modell-Änderungen zwischen
+  Modus-Eintritt und Press.
+- Fix (eine Stelle): `ResizeModeState` liest das Ziel zum PRESS-Zeitpunkt
+  frisch (`findById`, O(1)) und reicht das frische Record an den
+  `HandleDragState` weiter — sonst rechnete dessen Vorschau/Commit gegen
+  die Alt-Geometrie. Fehlt das Ziel (durch Block-23-Regel eigentlich
+  unmöglich), fällt der Press natürlich in den Klick-daneben-Pfad.
+- Tests zuerst (`ModeTargetRemovalTest`, +2): Undo eines Moves im Modus
+  (E-Griff an der wiederhergestellten Position muss einen HandleDragState
+  starten, nicht den Modus verlassen) und Undo eines Resizes (E-Griff an
+  der alten Größe). Beide vor dem Fix rot mit Idle statt HandleDragState.
+  **209 Tests grün** (vorher 207).
+- Doku: AGENTS.md Abschnitt 7 (Fresh-Read-Regel auf den Hit-Test
+  erweitert) + 8 (Test-Beschreibung, Zähler), hier.
+
+**Warum so:**
+
+- Frisch lesen zum Nutzungszeitpunkt statt die Zustände über
+  ObjectMoved/ObjectResized-Regeln neu zu bauen: Ein Lesen an einer Stelle
+  deckt jeden Weg ab, der die Geometrie ändern kann (Undo, Redo, künftige
+  Bulk-Operationen) — Fakt-Regeln pro Änderungstyp wären eine
+  Wartungsfalle (jeder neue Schreibpfad bräuchte eine neue Regel).
+- Das frische Record weiterreichen statt nur für den Hit-Test zu leihen:
+  Der `HandleDragState` rechnet Vorschau UND Commit gegen sein Target —
+  mit dem Entry-Record würde die erste Vorschau von der Alt-Geometrie
+  wegspringen.
+- View blieb unangetastet: Sie hielt die Fresh-Read-Disziplin bereits
+  korrekt ein (Griffe, Cursor-Presenter) — der Kern war derjenige, der
+  seine eigene Regel („Kern ist die einzige Geometrie-Wahrheit") brach.
+
+**Grenzen & Verbesserungskandidaten:**
+
+- `HandleDragState`/`MovingState` mid-Geste bei Objekt-Wegzug bleiben
+  weiter offen (Eng-Scope-Entscheidung aus Block 23 — dieselbe Session).
+- Visueller Smoke-Test beider Repros noch offen; Kern-Vertrag per
+  Event-Flow-Tests gesichert.
+
+## 17.11.2026 (23. Arbeitsblock) — Bugfix: Modi enden, wenn ihr Ziel per Modell-Fakt stirbt
+
+**Was:**
+
+- User-Fund: Objekt per Klick erzeugen → Doppelklick (Resize-Griffe) →
+  CTRL+Z. Das Objekt verschwand, die Griffe blieben stehen. Symmetrisch
+  latente Variante im RouteEditMode (Undo der Verbindungserstellung hätte
+  die W-Kreise/Sichtbarkeits-Flag hängen lassen).
+- Ursache: `RequestUndo` erreicht die Tool-Machine nicht — der Bus
+  dispatchte bislang nur `InputEvent` und `SelectTool` an sie. Die
+  null-Hinweise zum Modus-Exit (`ResizeModeChanged`/`WaypointFocusChanged`)
+  existierten nur auf Interaktionspfaden (Klick daneben, ESC, DEL,
+  SelectTool). Die View entfernt auf `ObjectsRemoved` nur das Shape; die
+  Griffe/W-Kreise leben vom Hinweis des modus-eigenen States — der vom
+  Ziel-Tod nichts erfuhr.
+- Test zuerst (`ModeTargetRemovalTest`, 3 Tests): Vor dem Fix rot an
+  exakt den zwei erwarteten Stellen (fehlende null-Hinweise) — der Bug
+  damit als reiner Event-Flow reproduziert, ohne UI. Der dritte Test
+  (unbezogene Entfernung lässt den Modus bestehen) war vorher schon grün
+  und sichert gegen Über-Eifer.
+- Fix (Kern, View unangetastet): Der Bus reicht `ObjectsRemoved` und
+  `ConnectionsRemoved` zusätzlich an die Tool-Machine — unabhängig vom
+  Panning, da ein Ziel auch mid-Pan sterben kann. Je eine neue Regel:
+  `ResizeModeState` (Target-ID in den entfernten Objekten →
+  `ResizeModeChanged(null)` + Idle), `RouteEditModeState` (fokussierte
+  Connection in `ConnectionsRemoved` → `WaypointFocusChanged(null)` +
+  Idle). Die Endpunkt-Kaskade publishes `ConnectionsRemoved` immer mit,
+  deshalb deckt die eine Regel jeden Weg ab, auf dem die Verbindung
+  stirbt. **207 Tests grün** (vorher 204).
+- Doku: AGENTS.md Abschnitte 5 (Dispatch-Ausnahme) + 8 (neuer Test,
+  Zähler), hier.
+
+**Warum so:**
+
+- Kern-Regel statt View-Fix (User-Entscheidung aus der Planungs-Diskussion,
+  zwei Optionen angeboten): Der Zustand IST das Flag — die Beendigung
+  gehört dem Eigentümer-State. Ein View-seitiges Abräumen in
+  `onObjectsRemoved` wäre ein Symptom-Patch, der für jeden Modus (und
+  jede künftige Präsentation) einzeln nachgebaut werden müsste; über die
+  Fakt-Regel bekommt die View den null-Hinweis gratis durch den
+  bestehenden Kanal.
+- Fakten statt Undo-Spezialfall: `RequestUndo` selbst an die Machine zu
+  dispatchen wäre die falsche Stelle — zum Verarbeitungszeitpunkt der
+  Machine ist das Undo noch nicht ausgeführt (UndoService ist Subscriber,
+  läuft NACH den States). Der Fakt ist der erste Moment, in dem
+  feststeht, WAS wirklich gestorben ist — und er deckt neben Undo auch
+  Kaskaden und künftige Schreibpfade ab.
+- Guard-Disjunktion bleibt gewahrt: Die neuen Regeln sind die ersten
+  ihrer Event-Typen in beiden States (`BaseStateTest` sichert die
+  Invariante).
+
+**Grenzen & Verbesserungskandidaten:**
+
+- `HandleDragState`/`MovingState` mid-Geste bei Objekt-Wegzug (Undo per
+  Tastatur während gebundener Maustaste) bleiben bewusst offen —
+  Eng-Scope-Entscheidung; dieselbe Fehlerklasse, falls es je im
+  Smoke-Test auffällt.
+- Nebenwirkung im DEL-Pfad des RouteEditMode: Löscht DEL die fokussierte
+  Verbindung, feuert die neue Fakt-Regel bereits während der laufenden
+  DEL-Aktion, dann publiziert die bestehende connectionAlive-Prüfung den
+  null-Hinweis ein zweites Mal — harmlos (View idempotent), aber ein
+  Kandidat, die alte Prüfung gegen die Regel zu ersetzen.
+- Visueller Smoke-Test des Original-Repros noch offen (Kern-Vertrag per
+  Event-Flow-Test gesichert).
+
+## 17.11.2026 (22. Arbeitsblock) — ESC-Semantik: Zwei Ebenen, als Entscheidung festgehalten
+
+**Was:**
+
+- Audit aller Drag-Gesten auf ESC-Abbruch: Resize-Drag (`HandleDragState`),
+  Gummiband (`PendingBoxSelectState`) und Verbindungsaufbau
+  (`ConnectingState`) brechen ab; Move-Drag (`MovingState`) und Kamera-Pan
+  (`CameraPanningState`) haben bewusst keine ESC-Regel.
+- Die vermeintliche Inkonsistenz wurde als SOLL-Verhalten in
+  `doc/tools.md` festgehalten: neue allgemeine ESC-Zeile (zwei Ebenen),
+  explizite Zeile „ESC während des Verschiebens" im SELECT-Werkzeug,
+  Hinweis beim „Drag auf W" im RouteEdit.
+
+**Warum so:**
+
+- Die Spec (`spec.md`/`tools.md`) fordert ESC nur für unverbindliche
+  In-flight-Konstruktionen, deren Modell unberührt ist — dort ist Abbruch
+  gratis („nichts ist geschehen"). Das Move-Drag committet ab dem ersten
+  Segment echte `MoveObjects`-Fakten; ESC wäre dort keine Absage, sondern
+  eine Rückgängigmachung — also CTRL+Z-Territorium (eine Geste = EIN
+  Undo-Punkt, der Rückweg ist exakt ein Tastendruck).
+- Ein ESC-Cancel für Move wäre teuer: `appliedWorldX/Y`-Inversdelta
+  kollidiert mit der KeyPressed-Gesten-Grenze im UndoService (Risiko:
+  zwei Undo-Punkte für eine Geste — schlimmere Inkonsistenz als die
+  behobene) plus Randfall „Maus bei ESC noch gehalten, späteres
+  MouseReleased ohne zugehörigen Press". Dokumentieren statt reparieren.
+- Die Dokumentation verhindert, dass die Lücke künftig als Übersehen
+  „repariert" wird.
+
+**Grenzen & Verbesserungskandidaten:**
+
+- Zeigt der Smoke-Test später, dass Nutzer reflexhaft ESC mitten im Drag
+  drücken: Rückfallpfad ist das Inversdelta aus `MovingState`-
+  `appliedWorldX/Y` — vorher verifizieren, WO die KeyPressed-Grenze im
+  UndoService relativ zum Event-Dispatch schließt.
+
+## 10.11.2026 (21. Arbeitsblock) — Modus- und Hover-Cursor
+
+**Was:**
+
+- Der Mauszeiger zeigt jetzt den Interaktionszustand an: Werkzeug-Grundcursor
+  (SELECT = Pfeil, Erzeugungs-Werkzeuge = Fadenkreuz), CLOSED_HAND während
+  Kamera-Panning und Verschiebe-Geste, Fadenkreuz während Gummiband und
+  Verbindungsaufbau, richtungsabhängige Resize-Cursor über den Griffen im
+  Resize-Modus, MOVE über Objekten und HAND über Verbindungen im
+  Auswahl-Werkzeug.
+- Kern (JavaFX-frei): `CustomCursor`-Enum (analog CustomKeyCode, übersetzt am
+  Systemrand) + EIN neuer State→UI-Hinweis `CursorChanged` (cursor == null =
+  Override freigegeben). Publiziert NUR von `CameraPanningState` und
+  `MovingState` — einmal pro Geste, nicht pro Drag-Segment; Klick-ohne-Drag
+  bleibt still.
+- View: `CursorPresenter` (reine Auflösung Interaktionszustand → CustomCursor,
+  headless testbar wie ConnectionViewMapper) + Verdrahtung in der GraphView.
+  Alles Darstellende leitet die View selbst ab: Werkzeug-Cursor aus
+  ToolChanged, Band/Verbindungs-Geste aus den vorhandenen Preview-Hinweisen,
+  Griff-/Objekt-/Verbindungs-Hover aus ihrem MOUSE_MOVED-Lesewissen.
+- Tests zuerst: `CursorHintTest` (5, Kern-Event-Flow inkl. Undo-Regression:
+  Hinweise sind keine Undo-Punkte) und `CursorPresenterTest` (11, headless:
+  Prioritäten, Griff-Geometrie, Zoom-Skalierung, JavaFX-Übersetzung).
+
+**Warum so:**
+
+- Sparsamer Kern-Hinweis statt Cursor durch den Bus für alles: Nur Gesten,
+  die in der View aus vorhandenen Hinweisen NICHT sichtbar werden (Pan, Move),
+  queren die Grenze — der Rest ist Lesewissen bzw. Ableitung aus bereits
+  vorhandenen Hinweisen. Damit bleibt die Goldene Regel „Bus für Zustands-
+  änderungen, Query für Lesewissen" gewahrt und kein Zustand doppelt geführt.
+- Griff-Cursor während des Drags kosten keinen eigenen Zustand: JavaFX feuert
+  unter gebundener Taste keine MOUSE_MOVED-Events — der beim Pressen gesetzte
+  richtungsabhängige Cursor klebt automatisch für die ganze Geste; beim
+  Vorschau-Ende (ResizePreviewChanged == null) rechnet die View neu.
+- Griff-Hit im Presenter mit demselben Grab-Radius (6 px/Zoom) wie der Kern
+  (ResizeModeState): Der Cursor zeigt exakt die Fläche, die der Kern greift.
+- `updateCursor()` liest das Resize-Ziel FRISCH per findById (O(1)) statt das
+  Record vom Modus-Eintritt zu halten — sonst hätte der Cursor nach einem
+  Griff-Commit gegen die Alt-Geometrie getestet (dieselbe Falle wie „Griffe
+  nicht mehr greifbar", Regel: nach Commit frisch lesen).
+- Hover-Affordanzen nur im Auswahl-Werkzeug: Im Erzeugungs-/Verbindungs-
+  werkzeug wäre MOVE über dem Ziel gelogen (Klick erzeugt/verbindet, nicht
+  zieht); während des laufenden Verbindungsaufbaus blockiert das Fadenkreuz
+  den Hover komplett.
+
+**Grenzen & Verbesserungskandidaten:**
+
+- HAND über einer Verbindung im CONNECT-Werkzeug zeigt nicht an, ob das Ziel
+  gültig wäre (ConnectionRules sind Kern-Wissen; eine Gültigkeits-Query wäre
+  neues Core-Surface — bewusst nicht gebaut).
+- Der Cursor über dem Inline-Editor-Overlay wechselt auf den Werkzeug-Grund-
+  cursor; die Editor-Controls zeigen ihren eigenen JavaFX-Cursor (I-Beam) —
+  getestet nur indirekt über die Presenter-Flags.
+- `mvn test`: 204/204 grün (vorher 188, +5 CursorHintTest, +11
+  CursorPresenterTest).
+
 ## 09.11.2026 (20. Arbeitsblock) — Pfeil folgt der Resize-Live-Vorschau
 
 **Was:**

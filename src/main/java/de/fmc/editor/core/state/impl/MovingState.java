@@ -1,6 +1,7 @@
 package de.fmc.editor.core.state.impl;
 
 import de.fmc.editor.core.event.ActionEvent;
+import de.fmc.editor.core.event.CustomCursor;
 import de.fmc.editor.core.event.InputEvent;
 import de.fmc.editor.core.state.InteractionState;
 import de.fmc.editor.core.state.rule.BaseState;
@@ -40,6 +41,10 @@ public final class MovingState extends BaseState {
     private double appliedWorldX;
     private double appliedWorldY;
 
+    /** Cursor-Hinweis bereits publiziert — die Geste greift EINMAL zu,
+     *  die Folge-Segmente rauschen nicht. */
+    private boolean cursorAnnounced = false;
+
     /** Kompat-Konstruktor: Rückkehr zum Auswahl-Werkzeug, ohne Snapping. */
     public MovingState(List<UUID> movingIds, double startScreenX, double startScreenY) {
         this(movingIds, null, startScreenX, startScreenY, IdleToolState::new);
@@ -69,6 +74,14 @@ public final class MovingState extends BaseState {
         // PLURALE Request — ein einzelnes Objekt ist der Spezialfall n=1;
         // der Service veröffentlicht EINEN Batch-Fakt pro Segment.
         addRule(InputEvent.MouseDragged.class, (e, c) -> {
+            // Geste ist zum echten Verschieben geworden -> Cursor
+            // übernehmen (einmalig; die View stellt beim Loslassen aus
+            // Werkzeug/Hover wieder her).
+            if (!cursorAnnounced) {
+                cursorAnnounced = true;
+                c.publisher().publish(new ActionEvent.CursorChanged(CustomCursor.CLOSED_HAND));
+            }
+
             // Maus-Segment greifen, BEVOR die Tracking-Positionen wandern
             double segmentScreenX = e.x() - lastScreenX;
             double segmentScreenY = e.y() - lastScreenY;
@@ -107,6 +120,11 @@ public final class MovingState extends BaseState {
         });
 
         // Loslassen beendet das Verschieben
-        addRule(InputEvent.MouseReleased.class, (e, c) -> returnState.get());
+        addRule(InputEvent.MouseReleased.class, (e, c) -> {
+            if (cursorAnnounced) {
+                c.publisher().publish(new ActionEvent.CursorChanged(null));
+            }
+            return returnState.get();
+        });
     }
 }

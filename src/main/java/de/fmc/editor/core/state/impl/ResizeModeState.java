@@ -3,6 +3,7 @@ package de.fmc.editor.core.state.impl;
 import de.fmc.editor.core.event.ActionEvent;
 import de.fmc.editor.core.event.CustomKeyCode;
 import de.fmc.editor.core.event.CustomMouseButton;
+import de.fmc.editor.core.event.DiagramEvent;
 import de.fmc.editor.core.event.InputEvent;
 import de.fmc.editor.core.model.DiagramObject;
 import de.fmc.editor.core.model.HandlePositions;
@@ -36,9 +37,18 @@ public final class ResizeModeState extends BaseState {
         addRule(InputEvent.MousePressed.class,
                 e -> e.button() == CustomMouseButton.PRIMARY,
                 (e, c) -> {
-                    Optional<HandleType> handle = handleAt(e.x(), e.y(), c);
+                    // Ziel FRISCH lesen statt das Entry-Record zu vertrauen:
+                    // Das Modell kann die Geometrie zwischen Modus-Eintritt
+                    // und Press verändert haben (Undo/Redo eines Moves oder
+                    // Resizes) — dieselbe Regel wie beim Rückkehr-Fresh-Read
+                    // nach dem Griff-Commit („Griffe nicht mehr greifbar").
+                    // Das frische Record wandert weiter in den HandleDragState,
+                    // sonst rechnete dessen Vorschau gegen die Alt-Geometrie.
+                    Optional<DiagramObject> current = c.diagram().findById(target.id());
+                    Optional<HandleType> handle = current.flatMap(
+                            obj -> handleAt(obj, e.x(), e.y(), c));
                     if (handle.isPresent()) {
-                        return new HandleDragState(target, handle.get());
+                        return new HandleDragState(current.get(), handle.get());
                     }
                     // Klick daneben (auch auf den Objekt-Körper) -> abwählen
                     c.publisher().publish(new ActionEvent.SetSelection(List.of()));
@@ -68,15 +78,31 @@ public final class ResizeModeState extends BaseState {
                 case SELECT -> new IdleToolState();
             };
         });
+
+        // 4. Ziel-Sterben (z. B. Undo der Erstellung): Der Modus endet mit
+        //    seinem Ziel — auch über Modell-Pfade, nicht nur Interaktions-
+        //    pfade. Der Bus reicht ObjectsRemoved an die Tool-Machine; ohne
+        //    diese Regel hingen Modus UND View-Griffe an einem toten Record
+        //    (User-Fund: Undo nach Doppelklick ließ die Griffe kleben).
+        addRule(DiagramEvent.ObjectsRemoved.class,
+                (e, c) -> e.objects().stream()
+                        .anyMatch(obj -> obj.id().equals(target.id())),
+                (e, c) -> {
+                    c.publisher().publish(new ActionEvent.ResizeModeChanged(null));
+                    return new IdleToolState();
+                });
     }
 
-    /** Hit-Test: Welcher Griff (falls einer) liegt in Griff-Nähe der Bildschirm-Position? */
-    private Optional<HandleType> handleAt(double screenX, double screenY, InteractionContext context) {
+    /** Hit-Test: Welcher Griff (falls einer) liegt in Griff-Nähe der Bildschirm-Position?
+     *  Rechnet gegen das übergebene (frisch gelesene) Objekt — nicht gegen das
+     *  Entry-Record des Modus. */
+    private Optional<HandleType> handleAt(DiagramObject current, double screenX, double screenY,
+                                          InteractionContext context) {
         double worldX = context.camera().screenToWorldX(screenX);
         double worldY = context.camera().screenToWorldY(screenY);
         double grabRadiusWorld = HANDLE_GRAB_RADIUS_PIXELS / context.camera().zoom();
 
-        return HandlePositions.of(target).entrySet().stream()
+        return HandlePositions.of(current).entrySet().stream()
                 .filter(entry -> Math.hypot(
                         entry.getValue().x() - worldX,
                         entry.getValue().y() - worldY) <= grabRadiusWorld)

@@ -128,6 +128,13 @@ public class GraphView {
     /** Objekt-ID der aktiven Resize-Live-Vorschau; null = keine Vorschau. */
     private UUID resizePreviewId;
 
+    /** Cursor-Präsentation: reine Auflösung Interaktionszustand →
+     *  CustomCursor (headless testbar); die Übersetzung nach JavaFX macht
+     *  CursorPresenter.toFx am Systemrand. Gespeist aus den State→UI-
+     *  Hinweisen (CursorChanged, ToolChanged, Previews, ResizeMode) und
+     *  dem Hover-Lesewissen des eigenen MOUSE_MOVED-Filters. */
+    private final CursorPresenter cursorPresenter = new CursorPresenter();
+
     private final EventHandler<MouseEvent> mouseMovedHandler;
 
     public GraphView(InteractionEventBus bus, DiagramQuery diagramQuery) {
@@ -284,6 +291,17 @@ public class GraphView {
         bus.subscribe(ActionEvent.WaypointFocusChanged.class,
                 e -> setWaypointsVisible(e.connectionId() != null));
         bus.subscribe(ActionEvent.BoxSelectPreviewChanged.class, this::onBandPreviewChanged);
+
+        // Cursor: Werkzeug-Grundcursor aus dem Toolbar-Sync, GESTEN-Override
+        // aus dem Kern (Pan/Move greifen zu — in der View sonst nicht sichtbar).
+        bus.subscribe(ActionEvent.ToolChanged.class, e -> {
+            cursorPresenter.setTool(e.tool());
+            updateCursor();
+        });
+        bus.subscribe(ActionEvent.CursorChanged.class, e -> {
+            cursorPresenter.setGestureCursor(e.cursor());
+            updateCursor();
+        });
     }
 
     /** Setzt die worldGroup-Transform aus dem Kamera-Snapshot des Buses. */
@@ -544,6 +562,14 @@ public class GraphView {
         resizePreviewId = null;
         handleGroup.getChildren().clear();
 
+        // Cursor-Sitzungszustand des alten Dokuments entsorgen (das Tool
+        // folgt gleich über SelectTool(SELECT) → ToolChanged; defensiv auch
+        // hier, damit kein Geste-Override des alten Dokuments klebt).
+        cursorPresenter.setGestureCursor(null);
+        cursorPresenter.setConnecting(false);
+        cursorPresenter.setBandActive(false);
+        updateCursor();
+
         for (DiagramObject object : event.objects()) {
             addObjectNode(object);
         }
@@ -641,6 +667,9 @@ public class GraphView {
         if (event.getTarget() != root) {
             setHovered(null);
             setHoveredConnection(null);
+            cursorPresenter.setObjectHovered(false);
+            cursorPresenter.setConnectionHovered(false);
+            updateCursor();
             return;
         }
         // Screen→Welt ausschließlich über die Kamera des Buses (niemals
@@ -666,6 +695,14 @@ public class GraphView {
                     .orElse(null);
         }
         setHoveredConnection(connectionHover);
+
+        // Cursor-Feed: Hover-Lesewissen + Mausposition/Zoom für den
+        // Griff-Hit-Test des Presenters.
+        cursorPresenter.setObjectHovered(hoveredId != null);
+        cursorPresenter.setConnectionHovered(hoveredConnectionId != null);
+        cursorPresenter.setMouseWorld(worldX, worldY);
+        cursorPresenter.setZoom(camera.zoom());
+        updateCursor();
 
         if (previewSourceId != null) {
             updatePreview();
@@ -725,6 +762,23 @@ public class GraphView {
         } else {
             path.setEffect(null);
         }
+    }
+
+    // ---------------------------------------------------------------------
+    // Cursor (Sitzungszustand: Hinweise aus dem Kern + Hover-Lesewissen)
+    // ---------------------------------------------------------------------
+
+    /** Wendet den aufgelösten Cursor auf die Zeichenfläche an. Das
+     *  Resize-Ziel wird FRISCH aus dem Modell gelesen (nicht das beim
+     *  Modus-Eintritt geschnappte Record): Nach einem Griff-Commit trägt
+     *  das alte Record die Alt-Geometrie — der Griff-Hit-Test des
+     *  Presenters lief sonst gegen veraltete Positionen (dieselbe Falle
+     *  wie „Griffe nicht mehr greifbar"). findById ist O(1). */
+    private void updateCursor() {
+        cursorPresenter.setResizeTarget(resizeModeTarget == null
+                ? null
+                : diagramQuery.findById(resizeModeTarget).orElse(null));
+        root.setCursor(CursorPresenter.toFx(cursorPresenter.resolve()));
     }
 
     // ---------------------------------------------------------------------
@@ -791,6 +845,8 @@ public class GraphView {
         previewPath.setVisible(previewSourceId != null);
         rebuildPreviewWaypointMarkers();
         updatePreview();
+        cursorPresenter.setConnecting(previewSourceId != null);
+        updateCursor();
     }
 
     /** Gelbe Marker der noch NICHT committeten Kettenpunkte (demo2-Stil:
@@ -839,6 +895,8 @@ public class GraphView {
      *  Treffer erst beim Loslassen (über die Kamera in Welt-Koordinaten);
      *  hier wird nur gezeichnet, was die Geste zeigt. */
     private void onBandPreviewChanged(ActionEvent.BoxSelectPreviewChanged event) {
+        cursorPresenter.setBandActive(event.startX() != null);
+        updateCursor();
         if (event.startX() == null) {
             bandRect.setVisible(false);
             return;
@@ -857,6 +915,7 @@ public class GraphView {
     private void onResizeModeChanged(ActionEvent.ResizeModeChanged event) {
         resizeModeTarget = event.target() != null ? event.target().id() : null;
         refreshHandles();
+        updateCursor();
     }
 
     /** Griff-Positionen aus HandlePositions (Kern-Geometrie) — 8×8-Quadrate
@@ -910,6 +969,10 @@ public class GraphView {
                 refreshConnectionsTouching(resizePreviewId);
                 refreshHandles();
                 resizePreviewId = null;
+                // Geste beendet: Cursor neu auflösen (während des Drags
+                // klebte der richtungsabhängige Cursor — kein MOUSE_MOVED
+                // feuert unter gebundener Taste).
+                updateCursor();
             }
             return;
         }

@@ -8,10 +8,11 @@ strikte Trennung zwischen Interaktionslogik (Core) und späterer UI (JavaFX).
 > hinaus: seit 02.11. mit vollständigem Inline-Text-Editor (freier Text,
 > externes K/R-Label, K-Buchstabe, R-Inhalt, Verbindungs-Label — Stufe
 > A/B/C, siehe Abschnitt 9), seit 03.11. mit Speichern/Laden (JSON im
-> demo2-Format, siehe Abschnitt 3 „Persistenz"). Offen: „Zentriert"-
-> Schalter-UI (User hat eigene Ideen), Layer-System — Details unter
-> „Geplant / fehlt noch"; dort stehende Klassennamen sind **Ziel-Vision,
-> nicht Realität**.
+> demo2-Format, siehe Abschnitt 3 „Persistenz"), seit 10.11. mit modus-
+> und hover-gerechtem Mauszeiger (siehe Abschnitt 9 „Cursor-Präsentation").
+> Offen: „Zentriert"-Schalter-UI (User hat eigene Ideen), Layer-System —
+> Details unter „Geplant / fehlt noch"; dort stehende Klassennamen sind
+> **Ziel-Vision, nicht Realität**.
 
 ---
 
@@ -301,7 +302,13 @@ Der Bus ist die zentrale Schaltstelle (`implements EventBusPublisher`):
    Klemmung 0.2–10 (`MIN_ZOOM`/`MAX_ZOOM`) macht `CameraInfo.zoomAt`.
 2. **Tool-Machine nur, wenn die Kamera nicht aktiv panned**
    (`cameraState.isActive()`); während des Pannings ist das Werkzeug
-   pausiert.
+   pausiert. Ausnahme: Modell-Fakten (`ObjectsRemoved`,
+   `ConnectionsRemoved`) erreichen die Machine auch während des Pannings —
+   Modus-States mit Ziel-Referenz (ResizeModeState, RouteEditMode) beenden
+   sich damit selbst, wenn ihr Ziel über einen Modell-Pfad stirbt
+   (z. B. Undo der Erstellung) statt nur über Interaktionspfade; sie
+   publizieren ihren null-Hinweis und kehren zum Idle zurück
+   (`ModeTargetRemovalTest`, 17.11.).
 3. **Kamera-Snapshot aktuell halten:** Der Bus konsumiert `PanView`/`ZoomView`
    selbst und ersetzt seinen `CameraInfo`-Snapshot via `panBy`/`zoomAt` —
    jeder folgende Event-Durchlauf rechnet mit der aktuellen Kamera.
@@ -445,7 +452,13 @@ ein `BaseStateTest` beweist die Invariante direkt. Konsequenzen:
   Fresh-Read hitesteten die Griffe gegen veraltete Positionen — User-Fund
   „Griffe nicht mehr greifbar"). Regel für unveränderliche Modelle: **Nach
   jedem Commit, der in einen State mit Objekt-Bezug zurückkehrt, frisch
-  lesen.**
+  lesen.** Dieselbe Regel gilt seither 17.11. für den Griff-Hit-Test selbst:
+  `ResizeModeState` liest das Ziel zum PRESS-Zeitpunkt frisch — Modell-
+  änderungen zwischen Modus-Eintritt und Press (Undo/Redo eines Moves oder
+  Resizes) altern das Entry-Record sonst, und die sichtbaren Griffe (View
+  liest frisch) wären nicht mehr greifbar; das frische Record wandert weiter
+  in den `HandleDragState`, damit Vorschau und Commit gegen die aktuelle
+  Geometrie rechnen.
 
 ### 8. Tests ohne UI
 Die Interaktionslogik ist vollständig ohne JavaFX testbar:
@@ -491,8 +504,22 @@ die State→UI-Hinweise und Initial-Queries, `ConnectionViewMapperTest` (09.11.)
 die Pfeil-Geometrie headless — JavaFX-Shapes (Path/Polygon/Group/Rotate)
 funktionieren ohne gestartetes Toolkit, deshalb ist die View-Geometrie
 ohne UI messbar (Preview-Override am Zielrand, Modell-Restore, Commit),
+`CursorHintTest` (10.11.) die Gesten-Cursor-Hinweise des Kerns (Pan/Move
+greifen einmalig mit CLOSED_HAND zu, Klick-ohne-Drag bleibt still,
+Release gibt frei; inkl. Undo-Regression: Hinweise sind KEINE
+Undo-Punkte), `CursorPresenterTest` (10.11.) die Cursor-Auflösung
+headless (Prioritäten Kern-Geste > Band/Verbindung > Griff-Hover >
+Hover-Affordanzen > Werkzeug-Grundcursor, Griff-Geometrie mit
+Zoom-Skalierung, JavaFX-Übersetzung am Systemrand),
+`ModeTargetRemovalTest` (17.11.) die Invariante „ein Modus endet mit
+seinem Ziel" auf Modell-Pfaden (Undo der Erstellung beendet den
+Resize-Modus / Undo der Verbindung den RouteEditMode je mit null-Hinweis
+und Rückkehr zum Idle; unbezogene Entfernungen lassen den Modus
+bestehen) UND den Fresh-Read des Griff-Hit-Tests (Undo eines Moves oder
+Resizes im Modus: Griffe greifen an der wiederhergestellten Position,
+Modus überlebt),
 `BusTestSupport` ist der geteilte
-Test-Rahmen — **188 Tests gesamt, alle grün**.
+Test-Rahmen — **209 Tests gesamt, alle grün**.
 **Jedes neue Interaktions-Feature bekommt einen solchen Event-basierten Test.**
 
 ### 9. UI-Schicht („Erstes Licht" 30.10. → Inline-Editor 02.11. → Persistenz 03.11.)
@@ -587,16 +614,42 @@ Test-Rahmen — **188 Tests gesamt, alle grün**.
   committeten Kettenpunkten (demo2-Stil; reine Präsentation des
   `ConnectionPreviewChanged`-Hinweises — Modell-Fakten werden die Ws erst
   mit `CreateConnection`).
+* **Cursor-Präsentation (10.11.):** Der Mauszeiger spiegelt den Interaktions-
+  zustand. Auflösung als reine Funktion in `CursorPresenter` (headless
+  testbar, Prioritäten: Kern-Geste > laufende Band-/Verbindungs-Geste >
+  Griff-Hover im Resize-Modus > Hover-Affordanzen im Auswahl-Werkzeug >
+  Werkzeug-Grundcursor); die Übersetzung nach JavaFX macht allein
+  `CursorPresenter.toFx` am Systemrand — der Kern kennt nur das Enum
+  `CustomCursor` (`core.event`, analog `CustomKeyCode`). Bewusst SPARSAMER
+  Kern-Hinweis: `CursorChanged` (cursor=null = Override freigegeben)
+  publizieren nur `CameraPanningState` und `MovingState` — einmal pro
+  Geste, nicht pro Drag-Segment; Klick-ohne-Drag bleibt still. Alles
+  Darstellende leitet die View selbst ab: Werkzeug-Grundcursor aus
+  `ToolChanged`, Gummiband/Verbindungsaufbau aus den vorhandenen
+  Preview-Hinweisen (Fadenkreuz), richtungsabhängige Resize-Cursor über
+  den Griffen aus ihrem Hover-Lesewissen (derselbe Grab-Radius 6 px/Zoom
+  wie der Kern-Hit-Test — der Cursor zeigt exakt die Greif-Fläche), MOVE
+  über Objekten und HAND über Verbindungsketten nur im Auswahl-Werkzeug
+  (im Verbindungs-Werkzeug wäre MOVE über dem Ziel gelogen). Griff-Drags
+  kosten keinen eigenen Zustand: Unter gebundener Taste feuert JavaFX
+  keine MOUSE_MOVED-Events, der richtungsabhängige Cursor klebt für die
+  Geste; beim Vorschau-Ende rechnet die View neu. `updateCursor()` liest
+  das Resize-Ziel FRISCH per findById (O(1)) — das Record vom Modus-
+  Eintritt trüge nach einem Commit die Alt-Geometrie („Griffe nicht mehr
+  greifbar"). `DiagramReset` entsorgt Override/Gesten-Flags des alten
+  Dokuments.
 * **State→UI-Hinweis-Intents** (in `ActionEvent`, KEINE Modell-Fakten — der
   UndoService ignoriert sie wie Kamera/Selektion): `ToolChanged` (vom Bus
   nach jedem Tool-Übergang), `ConnectionPreviewChanged` (sourceId=null
   räumt die Vorschau auf), `ResizeModeChanged` (target=null = Griffe weg),
   `WaypointFocusChanged` (connectionId=null = W-Kreise weg — treibt seit
-  Block 2 die W-Sichtbarkeit, die Toolbar-Checkbox ist entfallen) und
-  `BoxSelectPreviewChanged` (startX=null räumt das Band-Rechteck auf).
-  Muster: Versteckter Kern-Zustand quert die Grenze als Intent — die UI
-  besitzt ihn nie selbst. Prinzip: **Bus für Zustandsänderungen, Query für
-  Lesewissen — Hover ist Lesewissen.**
+  Block 2 die W-Sichtbarkeit, die Toolbar-Checkbox ist entfallen),
+  `BoxSelectPreviewChanged` (startX=null räumt das Band-Rechteck auf) und
+  `CursorChanged` (Gesten-Cursor des Kerns, cursor=null = Override
+  freigegeben — siehe „Cursor-Präsentation" unten). Muster: Versteckter
+  Kern-Zustand quert die Grenze als Intent — die UI besitzt ihn nie
+  selbst. Prinzip: **Bus für Zustandsänderungen, Query für Lesewissen —
+  Hover ist Lesewissen.**
 * **Bekannte Restchen:** View-z-Ordnung folgt der Fakt-Reihenfolge
   (Restauration landet visuell oben — TODO im `GraphView`); Preview ohne
   Rundung auf dem freien Abschnitt; Shortcuts K/R/C/T wirken nicht in den

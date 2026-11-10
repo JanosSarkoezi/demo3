@@ -1,6 +1,7 @@
 package de.fmc.editor.core.bus;
 
 import de.fmc.editor.core.event.ActionEvent;
+import de.fmc.editor.core.event.DiagramEvent;
 import de.fmc.editor.core.event.DomainEvent;
 import de.fmc.editor.core.event.InputEvent;
 import de.fmc.editor.core.model.DiagramQuery;
@@ -107,6 +108,21 @@ public class InteractionEventBus implements EventBusPublisher {
                 this.toolState = toolState.handleInput(event, context);
                 traceTransition("Tool", before, this.toolState, event);
             }
+        }
+
+        // 3c. Modell-Fakten erreichen die Tool-Machine unabhängig vom
+        // Panning: Modus-States (ResizeMode, RouteEditMode) halten Ziel-
+        // Referenzen, die auch außerhalb von Interaktionspfaden sterben
+        // können — der klassische Fall ist Undo der Erstellung. Ohne diesen
+        // Dispatch hingen Modus und View-Präsentation an einem toten Record
+        // (die null-Hinweise zum Modus-Exit gab es vorher nur auf
+        // Interaktionspfaden: Klick daneben, ESC, SelectTool). States ohne
+        // Regel für den Fakt bleiben unberührt.
+        if (event instanceof DiagramEvent.ObjectsRemoved
+                || event instanceof DiagramEvent.ConnectionsRemoved) {
+            InteractionState before = this.toolState;
+            this.toolState = toolState.handleInput(event, context);
+            traceTransition("Tool", before, this.toolState, event);
         }
 
         // 3b. Toolbar-Sync: Hat der Übergang das WERKZEUG geändert (nicht nur

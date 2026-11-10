@@ -13,6 +13,7 @@ steht, was die Hand am Mauszeiger tut.)
 | Toolbar | Demo2-Look; KEIN Select-Button — kein aktiver Toggle bedeutet SELECT |
 | Undo/Redo | **CTRL+Z** macht die letzte Geste rückgängig (pro Geste genau EIN Schritt, inkl. Lösch-Kaskade); **SHIFT+CTRL+Z** / **CTRL+Y** wiederholt; jede neue Aktion leert die Redo-Historie |
 | Löschen | **DEL** löscht ausschließlich die aktuelle Auswahl — nie „unter dem Cursor" |
+| ESC | Zwei Ebenen, bewusst getrennt: ESC bricht nur UNVERBINDLICHE, laufende Konstruktionen ab (Verbindungsaufbau, Gummiband, Resize-Vorschau) — dort ist das Modell noch unberührt, „nichts ist geschehen". Für alles bereits Vollzogene ist **CTRL+Z** zuständig. Insbesondere während eines Move-Drags (Objekt ODER Waypoint) ist ESC ein bewusster No-Op: Die Geste committet ab dem ersten Drag-Segment, der Rückweg ist CTRL+Z (eine Geste = EIN Undo-Punkt). Kein Bug, nicht „reparieren" |
 | Speichern/Laden | Toolbar-Sektion „Datei" oder **CTRL+S** / **CTRL+O**: JSON-Datei im demo2-Format (FileChooser, nur „Speichern unter" — kein gemerkter Pfad). Laden ERSETZT das ganze Diagramm ohne Undo-Rückweg (Datei öffnen = neues Dokument): Auswahl und Undo-Historie beginnen frisch, laufende Modi enden. Alte demo2-Dateien laden weiterhin; fehlerhafte Dateien zeigen einen Alert und lassen das aktuelle Diagramm unangetastet |
 | Snap-to-Grid | Toolbar-Feld „Snap to Grid": freier Zahlenwert (> 0, Komma erlaubt); Commit bei ENTER oder Fokus-Verlust, ungültige Eingabe stellt still auf den letzten gültigen Wert zurück. Das Netz ist IMMER aktiv, wirkt sofort (Snapping + Resize-Mindestgröße = 1 Zelle) und wird nicht gespeichert |
 | Fokus | Jeder Klick auf die Zeichenfläche holt den Tastatur-Fokus zurück — Shortcuts leben nur auf der Fläche |
@@ -37,6 +38,7 @@ Auslöser: Toolbar / kein aktiver Toggle. Basis-State: `IdleToolState`.
 |---|---|
 | Klick auf Objekt | Selektiert es EXKLUSIV (ersetzt die bisherige Auswahl) — zum Zeitpunkt des Drucks, nicht des Loslassens |
 | Klick auf bereits Selektiertes + Drag | Gruppen-Move: die ganze Auswahl wandert; die Auswahl kollabiert NICHT. Das primär gezogene Objekt snappt mit seinem Mittelpunkt auf den nächsten Gitterpunkt, die Gruppe folgt dem effektiven Delta. Wiggen innerhalb der Zelle bewegt nichts („kleben") |
+| ESC während des Verschiebens | Bewusster No-Op — das Move bricht NICHT ab (ab dem ersten Drag-Segment bereits committet). Loslassen beendet die Geste, CTRL+Z macht sie als Ganzes rückgängig. Siehe „Allgemein: ESC" |
 | CTRL+Klick | Objekt zur Auswahl hinzufügen; auf bereits Selektiertem: herausnehmen (Toggle) |
 | Klick auf leere Fläche / ESC | Auswahl leeren |
 | CTRL+Leerraum-Drag | Gummiband: stummes Rechteck bis zum Loslassen, dann werden alle Objekte darin ausgewählt (das Band ERSETZT die Auswahl). CTRL+Klick ohne Drag ändert nichts, ESC bricht ab |
@@ -100,7 +102,7 @@ Mittelpunkt = Klickpunkt, Erzeugung frei von Snapping.
 |---|---|
 | Betreten | CTRL+Klick auf die Verbindungskette (seit 03.11. — der einfache Klick selektiert nur): Die Waypoints der Verbindung erscheinen (gelbe Kreise) und sind greifbar; der Hover-Glow hatte das Ziel angezeigt. Alternativ erreicht der Doppelklick auf ein freies Segment den Modus gleich mit dem Einfügen |
 | Klick / CTRL+Klick / Gummiband | Selektion MIT Waypoints (wie SELECT, nur dass Ws jetzt Klick-Ziele sind) |
-| Drag auf W | Route umformen: W einzeln verschieben (snappt ans Grid) |
+| Drag auf W | Route umformen: W einzeln verschieben (snappt ans Grid). ESC bricht auch hier bewusst NICHT ab — Rückweg CTRL+Z (siehe „Allgemein: ESC") |
 | DEL | Auswahl löschen; überlebende Verbindungen verlieren nur ihre gelöschten Ws (Prune). Stirbt die fokussierte Verbindung, endet der Modus mit ihr |
 | Doppelklick auf ein freies Segment | NEUEN Waypoint an der Klickstelle einfügen (auch bei Direktverbindungen ohne Ws); kein Undo-Spam — Einfügen ist EIN Schritt |
 | Klick auf eine andere Verbindung | Fokus wechselt dorthin (alte Ws verschwinden, neue erscheinen) |

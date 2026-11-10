@@ -3,6 +3,7 @@ package de.fmc.editor.core.state.impl;
 import de.fmc.editor.core.event.ActionEvent;
 import de.fmc.editor.core.event.CustomKeyCode;
 import de.fmc.editor.core.event.CustomMouseButton;
+import de.fmc.editor.core.event.DiagramEvent;
 import de.fmc.editor.core.event.InputEvent;
 import de.fmc.editor.core.model.Circle;
 import de.fmc.editor.core.model.Rectangle;
@@ -176,6 +177,19 @@ public final class RouteEditModeState extends BaseState {
                 case SELECT -> new IdleToolState();
             };
         });
+
+        // 5. Fokus-Sterben (z. B. Undo der Verbindungserstellung): Der Modus
+        //    endet mit seiner Verbindung — auch über Modell-Pfade, nicht nur
+        //    Interaktionspfade (Klick daneben, ESC, DEL). Die Endpunkt-
+        //    Kaskade publishes ConnectionsRemoved immer mit, deshalb deckt
+        //    diese eine Regel jeden Weg ab, auf dem die Verbindung stirbt.
+        addRule(DiagramEvent.ConnectionsRemoved.class,
+                (e, c) -> e.connections().stream()
+                        .anyMatch(conn -> conn.id().equals(connectionId)),
+                (e, c) -> {
+                    c.publisher().publish(new ActionEvent.WaypointFocusChanged(null));
+                    return new IdleToolState();
+                });
     }
 
     /** Entfernt Waypoints aus der aktuellen Auswahl — nur falls tatsächlich

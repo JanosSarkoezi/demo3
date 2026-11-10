@@ -243,4 +243,16 @@ public sealed interface ActionEvent extends DomainEvent {
     record BoxSelectPreviewChanged(Double startX, Double startY,
                                    Double currentX, Double currentY) implements ActionEvent {
     }
+
+    /** Hinweis: Eine Kern-GESTE verlangt gerade den Mauszeiger
+     *  (CLOSED_HAND: Kamera-Panning, Verschiebe-Geste). cursor == null:
+     *  Override freigegeben — die View stellt den Cursor aus Werkzeug-
+     *  Grundcursor und Hover wieder her. Bewusst sparsam: Nur Gesten,
+     *  die in der View aus vorhandenen Hinweisen/Lesewissen NICHT
+     *  sichtbar werden, queren hier die Grenze — Werkzeug-Cursor leitet
+     *  die View aus ToolChanged ab, Gummiband/Verbindungs-Geste aus
+     *  ihren Preview-Hinweisen, Griff-/Objekt-/Verbindungs-Hover aus
+     *  Lesewissen über die Query. Sitzungszustand, KEIN Modell-Fakt. */
+    record CursorChanged(CustomCursor cursor) implements ActionEvent {
+    }
 }
