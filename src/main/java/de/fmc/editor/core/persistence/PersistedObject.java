@@ -21,6 +21,13 @@ import java.util.UUID;
  * centered ist bewusst der Wrapper: null = „Feld fehlt in alter Datei" ist
  * unterscheidbar von false.
  *
+ * Event-Felder (demo3, 17.11.): ownerId/side/horizontalExtent/verticalRise
+ * — dieselbe Toleranz-Logik: null (fehlendes Feld) bzw. ungültige side
+ * fallen im Codec auf die Defaults (Seite RIGHT, Maße 40/40); fehlende
+ * ownerId macht den Eintrag defekt (still übersprungen). Die Spitzen-
+ * Position x/y wird mitgeschrieben, beim Laden aber aus Owner + Seite neu
+ * abgeleitet (selbstheilend).
+ *
  * @author saj
  */
 public record PersistedObject(
@@ -33,6 +40,10 @@ public record PersistedObject(
         UUID layerId,
         String label,
         String content,
-        Boolean centered
+        Boolean centered,
+        UUID ownerId,
+        String side,
+        Double horizontalExtent,
+        Double verticalRise
 ) {
 }

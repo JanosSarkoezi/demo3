@@ -6,12 +6,14 @@ import de.fmc.editor.core.event.CustomMouseButton;
 import de.fmc.editor.core.event.InputEvent;
 import de.fmc.editor.core.model.Circle;
 import de.fmc.editor.core.model.DiagramObject;
+import de.fmc.editor.core.model.Event;
 import de.fmc.editor.core.model.Rectangle;
 import de.fmc.editor.core.model.Text;
 import de.fmc.editor.core.model.ToolType;
 import de.fmc.editor.core.model.Waypoint;
 import de.fmc.editor.core.state.InteractionContext;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -38,6 +40,13 @@ public final class IdleToolState extends ToolState {
                                 || target.get() instanceof Text) {
                             c.publisher().publish(new ActionEvent.ResizeModeChanged(target.get()));
                             return new ResizeModeState(target.get());
+                        }
+                        // Doppelklick auf ein Event: Label bearbeiten
+                        // (Inline-Editor) statt Resize-Modus — die Form
+                        // ändert das Event-Werkzeug, nicht der Resize-Modus.
+                        if (target.get() instanceof Event event) {
+                            c.publisher().publish(new ActionEvent.EditEventLabel(event.id()));
+                            return this;
                         }
                         return this;
                     }
@@ -127,7 +136,15 @@ public final class IdleToolState extends ToolState {
                     // Selektion bei Maus-Druck + Verschieben vorbereiten
                     // (einfach = exklusiv, Ctrl = Toggle, Plain-Press auf
                     // Selektiertem = Gruppen-Move) — gemeinsame Semantik mit
-                    // dem RouteEditMode.
+                    // dem RouteEditMode. EVENTS sind die Ausnahme: nicht
+                    // bewegbar (Geometrie vom R abgeleitet — Drag wäre
+                    // gelogen), deshalb reine Selektion wie bei Verbindungen;
+                    // ihr R zieht die Gruppe über die Move-Expansion mit.
+                    if (target.get() instanceof Event event) {
+                        selectOnly(c, e, event.id());
+                        return this;
+                    }
+
                     return PressSelections.selectAndPrepareMove(
                             c, e, target.get().id(), IdleToolState::new);
                 });
@@ -144,6 +161,32 @@ public final class IdleToolState extends ToolState {
             InteractionContext c, double worldX, double worldY) {
         return c.diagram().findTopmostAt(worldX, worldY)
                 .filter(obj -> !(obj instanceof Waypoint));
+    }
+
+    /**
+     * Reine Selektion eines nicht bewegbaren Ziels (Events, analog zur
+     * Verbindungs-Semantik): einfach = exklusiv, Ctrl = Toggle, Plain-Press
+     * auf bereits Selektiertem kollabiert die Menge nicht — aber KEIN
+     * Move-Vorbereiten, ein Drag bleibt bewusst ein No-Op. Die Selektions-
+     * Semantik ist dieselbe wie in {@link PressSelections} (eine Wahrheit,
+     * nur das Move-Vorbereiten entfällt — Events folgen ihrem R über die
+     * Move-Expansion, nicht als eigene Basis).
+     */
+    private static void selectOnly(InteractionContext c, InputEvent.MousePressed e, UUID targetId) {
+        List<UUID> current = c.selection().selectedIds();
+        List<UUID> newSelection;
+        if (e.controlDown()) {
+            newSelection = new ArrayList<>(current);
+            newSelection.remove(targetId);
+            if (!current.contains(targetId)) {
+                newSelection.add(targetId);
+            }
+        } else if (current.contains(targetId)) {
+            newSelection = current;
+        } else {
+            newSelection = List.of(targetId);
+        }
+        c.publisher().publish(new ActionEvent.SetSelection(newSelection));
     }
 
     private void registerDefaultRules() {

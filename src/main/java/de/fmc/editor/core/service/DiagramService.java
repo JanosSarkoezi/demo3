@@ -7,6 +7,9 @@ import de.fmc.editor.core.model.Circle;
 import de.fmc.editor.core.model.Connection;
 import de.fmc.editor.core.model.DiagramObject;
 import de.fmc.editor.core.model.DiagramQuery;
+import de.fmc.editor.core.model.Event;
+import de.fmc.editor.core.model.EventGeometry;
+import de.fmc.editor.core.model.EventSide;
 import de.fmc.editor.core.model.Rectangle;
 import de.fmc.editor.core.model.Text;
 import de.fmc.editor.core.model.TextAnchor;
@@ -60,6 +63,13 @@ public class DiagramService implements DiagramQuery {
                 source.getClass().equals(target.getClass())
                         ? Optional.of("Objekte des gleichen Typs können nicht verbunden werden")
                         : Optional.empty());
+        // Events sind Symbole am R, keine Akteure: Sie besitzen keinen eigenen
+        // Verbindungsknoten. Zentral als Rule (nie in den States — Goldene
+        // Regel: Verbindungsvalidierung stecktbar hier).
+        connectionRules.add((source, target) ->
+                (source instanceof Event || target instanceof Event)
+                        ? Optional.of("Events sind keine Verbindungsendpunkte")
+                        : Optional.empty());
     }
 
     /**
@@ -86,6 +96,9 @@ public class DiagramService implements DiagramQuery {
         bus.subscribe(ActionEvent.UpdateText.class, this::onUpdateText);
         bus.subscribe(ActionEvent.SetAnchor.class, this::onSetAnchor);
         bus.subscribe(ActionEvent.AddAnchoredText.class, this::onAddAnchoredText);
+        bus.subscribe(ActionEvent.CreateEvent.class, this::onCreateEvent);
+        bus.subscribe(ActionEvent.SetEventLabel.class, this::onSetEventLabel);
+        bus.subscribe(ActionEvent.ResizeEvent.class, this::onResizeEvent);
         bus.subscribe(ActionEvent.LoadDiagram.class, this::onLoadDiagram);
     }
 
@@ -209,6 +222,14 @@ public class DiagramService implements DiagramQuery {
         if (resized != null) {
             objects.put(resized.id(), resized);
             publishFact(new DiagramEvent.ObjectResized(current, resized));
+            // R-Resize = Re-Dock: Die Event-Spitze sitzt bei ¼ der (neuen)
+            // Breite vom Seitenrand — jede Geometrie-Änderung des R leitet
+            // sie neu ab. SICHTBARER Move-Eintrag im selben Gesten-Eintrag
+            // (Präzedenzfall W-Gleiten: nie versteckt), Undo mechanisch über
+            // die Vor-Position.
+            if (resized instanceof Rectangle rectangle) {
+                publishRedock(findOwnedEventIds(rectangle.id()));
+            }
         }
         // Keine Box (oder unbekannte ID) => kein Fakt, nichts passiert.
     }
@@ -294,15 +315,20 @@ public class DiagramService implements DiagramQuery {
             doomedObjects.putIfAbsent(obj.id(), obj);
         }
 
-        // Phase 1b — Text-Kaskade: Texte, deren Owner (Objekt ODER Connection)
-        // selbst doomed ist, gehören mit zur Lösch-Geste — als sichtbarer
-        // Fakt, nicht versteckt (demo2-Lektion: Kaskade und Undo dürfen nie
+        // Phase 1b — Owned-Kaskade: Texte, deren Owner (Objekt ODER
+        // Connection) selbst doomed ist, und Events, deren R doomed ist,
+        // gehören mit zur Lösch-Geste — als sichtbarer Fakt, nicht
+        // versteckt (demo2-Lektion: Kaskade und Undo dürfen nie
         // auseinanderdriften, also lebt sie ausschließlich hier).
         for (DiagramObject obj : objects.values()) {
             if (obj instanceof Text text && text.ownerId() != null
                     && (doomedObjects.containsKey(text.ownerId())
                         || doomedConnections.containsKey(text.ownerId()))) {
                 doomedObjects.putIfAbsent(text.id(), text);
+            }
+            if (obj instanceof Event ownedEvent && ownedEvent.ownerId() != null
+                    && doomedObjects.containsKey(ownedEvent.ownerId())) {
+                doomedObjects.putIfAbsent(ownedEvent.id(), ownedEvent);
             }
         }
         if (doomedObjects.isEmpty() && doomedConnections.isEmpty()) {
@@ -557,6 +583,97 @@ public class DiagramService implements DiagramQuery {
         publishFact(new DiagramEvent.ObjectAdded(text));
     }
 
+    // ---------- Event-Schreibpfad ----------
+
+    /**
+     * Erzeugt ein Event an einem R: Validierung zentral hier (Owner muss ein
+     * Rectangle sein — alles andere bleibt stiller No-Op, kein Crash), die
+     * Spitzen-Position leitet der Service aus Owner + Seite ab. Standardmaß
+     * 40/40 (User-Entscheidung 17.11.), Ebene = die des Owners.
+     */
+    private void onCreateEvent(ActionEvent.CreateEvent event) {
+        if (!(objects.get(event.ownerId()) instanceof Rectangle owner)) {
+            return; // Ohne gültiges R kein Event — stiller No-Op
+        }
+        double[] tip = EventGeometry.tip(owner, event.side() == null ? EventSide.RIGHT : event.side());
+        Event created = new Event(UUID.randomUUID(), owner.id(),
+                event.side() == null ? EventSide.RIGHT : event.side(),
+                event.label(), EventGeometry.DEFAULT_EXTENT, EventGeometry.DEFAULT_RISE,
+                tip[0], tip[1], owner.layerId());
+        addToModel(created);
+        publishFact(new DiagramEvent.ObjectAdded(created));
+    }
+
+    private void onSetEventLabel(ActionEvent.SetEventLabel event) {
+        if (objects.get(event.id()) instanceof Event ownedEvent) {
+            Event updated = redocked(new Event(ownedEvent.id(), ownedEvent.ownerId(),
+                    ownedEvent.side(), event.label(), ownedEvent.horizontalExtent(),
+                    ownedEvent.verticalRise(), ownedEvent.x(), ownedEvent.y(), ownedEvent.layerId()));
+            objects.put(updated.id(), updated);
+            publishFact(new DiagramEvent.ObjectTextChanged(ownedEvent, updated));
+        }
+        // Kein Event (oder unbekannte ID) => kein Fakt, nichts passiert.
+    }
+
+    /**
+     * Form-Änderung: NUR die zwei Segmentlängen — die Spitze bleibt ans R
+     * gedockt (Re-Dock idempotent mitgeführt). Ungültige Werte (NaN,
+     * unendlich) bleiben still ignoriert; Unterschreiten der Mindestlänge
+     * klemmt auf den Bogen-Radius (der Viertelkreis trägt immer).
+     */
+    private void onResizeEvent(ActionEvent.ResizeEvent event) {
+        if (!(objects.get(event.id()) instanceof Event ownedEvent)) {
+            return;
+        }
+        if (!Double.isFinite(event.horizontalExtent()) || !Double.isFinite(event.verticalRise())) {
+            return;
+        }
+        double extent = Math.max(EventGeometry.MIN_SEGMENT, event.horizontalExtent());
+        double rise = Math.max(EventGeometry.MIN_SEGMENT, event.verticalRise());
+        Event updated = redocked(new Event(ownedEvent.id(), ownedEvent.ownerId(),
+                ownedEvent.side(), ownedEvent.label(), extent, rise,
+                ownedEvent.x(), ownedEvent.y(), ownedEvent.layerId()));
+        objects.put(updated.id(), updated);
+        publishFact(new DiagramEvent.ObjectResized(ownedEvent, updated));
+    }
+
+    /**
+     * Liefert das Event mit frisch abgeleiteter Spitzen-Position — der
+     * Andockpunkt ist eine reine Funktion von (Owner-Geometrie, Seite),
+     * jede Schreibbahn leitet ihn idempotent neu ab. Ohne Owner (defensiv,
+     * die Kaskade hält ihn am Leben) bleibt das Record unverändert.
+     */
+    private Event redocked(Event event) {
+        if (!(objects.get(event.ownerId()) instanceof Rectangle owner)) {
+            return event;
+        }
+        double[] tip = EventGeometry.tip(owner, event.side());
+        return new Event(event.id(), event.ownerId(), event.side(), event.label(),
+                event.horizontalExtent(), event.verticalRise(), tip[0], tip[1], event.layerId());
+    }
+
+    /** Re-Dock der genannten Events: Nur TATSÄCHLICH bewegte Spitzen
+     *  werden publiziert (kein Fakten-Rauschen) — als Batch im selben
+     *  Gesten-Eintrag wie die auslösende Änderung. */
+    private void publishRedock(List<UUID> eventIds) {
+        List<DiagramEvent.ObjectMoved> moved = new ArrayList<>();
+        for (UUID id : eventIds) {
+            if (!(objects.get(id) instanceof Event ownedEvent)) {
+                continue;
+            }
+            Event redocked = redocked(ownedEvent);
+            if (redocked.x() == ownedEvent.x() && redocked.y() == ownedEvent.y()) {
+                continue; // Geometrie hat die Spitze nicht bewegt — kein Fakt.
+            }
+            objects.put(id, redocked);
+            moved.add(new DiagramEvent.ObjectMoved(id,
+                    ownedEvent.x(), ownedEvent.y(), redocked.x(), redocked.y()));
+        }
+        if (!moved.isEmpty()) {
+            publishFact(new DiagramEvent.ObjectsMoved(List.copyOf(moved)));
+        }
+    }
+
     // ---------- Persistenz: Laden (Restore — kein Erzeugen) ----------
 
     /**
@@ -577,13 +694,27 @@ public class DiagramService implements DiagramQuery {
         connections.clear();
 
         List<DiagramObject> loadedObjects = new ArrayList<>();
+        List<Event> loadedEvents = new ArrayList<>();
         for (DiagramObject obj : event.objects()) {
             if (obj == null || objects.containsKey(obj.id())) {
                 continue; // Duplikat/Defekt still überspringen — kein Crash
             }
             objects.put(obj.id(), obj);
             zOrder.add(obj.id());
-            loadedObjects.add(obj);
+            if (obj instanceof Event loadedEvent) {
+                loadedEvents.add(loadedEvent); // Re-Dock NACH dem Laden (s. u.)
+            } else {
+                loadedObjects.add(obj);
+            }
+        }
+        // Events docken frisch ab (selbstheilend gegen randeditierte Dateien):
+        // Die Spitze ist eine reine Funktion von Owner + Seite — still, denn
+        // DiagramReset trägt den kompletten NACH-Zustand, ein Einzel-Fakt
+        // wäre Rauschen. Ohne Owner bleibt der gespeicherte Stand.
+        for (Event loadedEvent : loadedEvents) {
+            Event redocked = redocked(loadedEvent);
+            objects.put(redocked.id(), redocked);
+            loadedObjects.add(redocked);
         }
         List<Connection> loadedConnections = new ArrayList<>();
         for (Connection conn : event.connections()) {
@@ -663,7 +794,8 @@ public class DiagramService implements DiagramQuery {
 
     /**
      * Effektive Move-Menge zu einer Auswahl-Basis: die Basis selbst, ihre
-     * externen Label (wandern mit ihrem Owner) und die Waypoints
+     * externen Label (wandern mit ihrem Owner), ihre Events (Spitze wandert
+     * per Delta mit, Längen relativ zur R-Geometrie) und die Waypoints
      * VOLLSELEKTierter Verbindungen (beide Endpunkte in der Basis) — die
      * Route gehört zur Verbindung und wandert als Ganzes mit. Teilselektierte
      * Verbindungen bleiben verankert. Verankerte Texte als DRAG-BASIS
@@ -675,12 +807,19 @@ public class DiagramService implements DiagramQuery {
      * bewegbar — sie folgen ihren Endpunkten. Vor allem dürfte ihre ID die
      * owned-Texte NICHT hereinziehen: Ein Verbindungs-Label als Move-BASIS
      * würde beim Drag RE-ANKERT statt gleiten.
+     *
+     * Event-IDs in der Basis werden equally gefiltert (17.11.): Events sind
+     * nicht selbst bewegbar (Geometrie vom R abgeleitet — Drag am Event ist
+     * bewusst ein No-Op wie an Verbindungen); ihre eigenen Owned-Anhänge
+     * gibt es nicht. Als Mitnehmer ihres R tauchen sie über die Objekt-
+     * Expansion unten auf.
      */
     @Override
     public List<UUID> findMoveSet(List<UUID> basisIds) {
         List<UUID> moveSet = new ArrayList<>();
         for (UUID id : basisIds) {
-            if (objects.get(id) != null) {
+            DiagramObject obj = objects.get(id);
+            if (obj != null && !(obj instanceof Event)) {
                 moveSet.add(id);
             }
         }
@@ -689,6 +828,11 @@ public class DiagramService implements DiagramQuery {
             for (UUID textId : findTextIdsOwnedBy(id)) {
                 if (!moveSet.contains(textId)) {
                     moveSet.add(textId);
+                }
+            }
+            for (UUID eventId : findOwnedEventIds(id)) {
+                if (!moveSet.contains(eventId)) {
+                    moveSet.add(eventId);
                 }
             }
         }
@@ -726,6 +870,18 @@ public class DiagramService implements DiagramQuery {
         for (UUID id : zOrder) {
             if (objects.get(id) instanceof Text text && ownerId.equals(text.ownerId())) {
                 result.add(text.id());
+            }
+        }
+        return result;
+    }
+
+    /** IDs aller Events mit diesem Owner-R, in z-Ordnung (Service-seitiges
+     *  Lesewissen für Move-Expansion und Re-Dock). */
+    private List<UUID> findOwnedEventIds(UUID ownerId) {
+        List<UUID> result = new ArrayList<>();
+        for (UUID id : zOrder) {
+            if (objects.get(id) instanceof Event ownedEvent && ownerId.equals(ownedEvent.ownerId())) {
+                result.add(id);
             }
         }
         return result;
@@ -903,10 +1059,16 @@ public class DiagramService implements DiagramQuery {
             case Text t      -> new Text(t.id(), t.content(), t.x() + dx, t.y() + dy,
                     t.width(), t.height(), t.anchor(), t.ownerId(), t.layerId());
             case Waypoint w  -> new Waypoint(w.id(), w.x() + dx, w.y() + dy, w.layerId());
+            // Delta-Move des Andockpunkts: Die Längen sind relativ zur
+            // R-Geometrie — das ganze Symbol wandert mit dem Delta mit.
+            case Event e     -> new Event(e.id(), e.ownerId(), e.side(), e.label(),
+                    e.horizontalExtent(), e.verticalRise(),
+                    e.x() + dx, e.y() + dy, e.layerId());
         };
     }
 
-    /** Hit-Test pro Geometrie-Typ. x/y ist jeweils das Zentrum. */
+    /** Hit-Test pro Geometrie-Typ. x/y ist jeweils das Zentrum (Event:
+     *  Andockpunkt — die Kette/Hülle kommt aus EventGeometry). */
     private boolean hit(DiagramObject obj, double worldX, double worldY) {
         return switch (obj) {
             case Circle c    -> Math.hypot(worldX - c.x(), worldY - c.y()) <= c.radius();
@@ -915,6 +1077,8 @@ public class DiagramService implements DiagramQuery {
             case Text t      -> Math.abs(worldX - t.x()) <= t.width() / 2
                              && Math.abs(worldY - t.y()) <= t.height() / 2;
             case Waypoint w  -> Math.hypot(worldX - w.x(), worldY - w.y()) <= 5.0;
+            case Event e     -> objects.get(e.ownerId()) instanceof Rectangle owner
+                             && EventGeometry.hit(e, owner, worldX, worldY);
         };
     }
 
@@ -929,6 +1093,14 @@ public class DiagramService implements DiagramQuery {
                              && t.y() + t.height() / 2 >= minY && t.y() - t.height() / 2 <= maxY;
             case Waypoint w  -> w.x() >= minX && w.x() <= maxX
                              && w.y() >= minY && w.y() <= maxY;
+            case Event e     -> {
+                if (!(objects.get(e.ownerId()) instanceof Rectangle owner)) {
+                    yield false; // Kaskaden-Fenster: ohne Owner keine Geometrie
+                }
+                double[] b = EventGeometry.bounds(owner, e.side(), e.label(),
+                        e.horizontalExtent(), e.verticalRise());
+                yield b[2] >= minX && b[0] <= maxX && b[3] >= minY && b[1] <= maxY;
+            }
         };
     }
 

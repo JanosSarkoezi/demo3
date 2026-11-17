@@ -2,8 +2,9 @@ package de.fmc.editor.core.event;
 
 import de.fmc.editor.core.model.Connection;
 import de.fmc.editor.core.model.DiagramObject;
+import de.fmc.editor.core.model.EventSide;
 import de.fmc.editor.core.model.TextAnchor;
-import de.fmc.editor.core.model.ToolType; // Enum: SELECT, CIRCLE, RECTANGLE, CONNECT, TEXT
+import de.fmc.editor.core.model.ToolType; // Enum: SELECT, CIRCLE, RECTANGLE, CONNECT, TEXT, EVENT
 import de.fmc.editor.core.model.Waypoint;
 
 import java.util.List;
@@ -138,6 +139,29 @@ public sealed interface ActionEvent extends DomainEvent {
                            double width, double height, UUID layerId) implements ActionEvent {
     }
 
+    // --- Event (gebogener Pfeil am R, 17.11.) ---
+
+    /** Erzeugt ein Event an einem R: Der Service validiert den Owner (muss
+     *  ein Rectangle sein) und leitet die Spitzen-Position (x/y) aus Owner
+     *  + Seite ab — Geometrie-Wissen liegt nie im Aufrufer. Seite = Klick-
+     *  hälfte des R (Standard rechts). Create-Präzedenzfall wie
+     *  CreateConnection: validierte NEU-Erzeugung, nicht AddElement-Restore. */
+    record CreateEvent(UUID ownerId, EventSide side, String label) implements ActionEvent {
+    }
+
+    /** Setzt das Label eines Events (Text am Pfadanfang) — nur bei Änderung
+     *  publishen (Werkzeug/Editor prüfen), ein Undo-Punkt pro Änderung. */
+    record SetEventLabel(UUID id, String label) implements ActionEvent {
+    }
+
+    /** Form-Änderung eines Events: NUR die zwei Segmentlängen (horizontaler
+     *  Ausleger, senkrechter Aufstieg) — die Spitze bleibt ans R gedockt.
+     *  Commit genau EINMAL beim Loslassen einer Griff-Geste; der Service
+     *  klemmt auf die Mindestlänge (Bogen-Radius). */
+    record ResizeEvent(UUID id, double horizontalExtent, double verticalRise) implements ActionEvent {
+    }
+
+
     // --- UI-Intents für den Inline-Editor ---
     // Der DiagramService ignoriert sie still; Konsument ist die UI. Seit
     // 02.11. (Stufe A) abonniert der InlineTextEditorController
@@ -163,6 +187,17 @@ public sealed interface ActionEvent extends DomainEvent {
 
     /** Editor-Intent: Neues Verbindungs-Label — der Anker wurde vom Werkzeug projiziert. */
     record CreateConnectionText(UUID connectionId, TextAnchor anchor) implements ActionEvent {
+    }
+
+    /** Editor-Intent: Neues Event-Label an einem R — Seitenlage aus der
+     *  Klickhälfte, worldX/worldY = vom Werkzeug gelesener Label-Anker
+     *  (EventGeometry-Startpunkt), der Editor öffnet dort. Commit des
+     *  Editor läuft über CreateEvent; leerer Commit verwirft still. */
+    record CreateEventFor(UUID ownerId, EventSide side, double worldX, double worldY) implements ActionEvent {
+    }
+
+    /** Editor-Intent: Label dieses bestehenden Events bearbeiten. */
+    record EditEventLabel(UUID eventId) implements ActionEvent {
     }
 
     // --- Undo/Redo (UI übersetzt Shortcuts wie CTRL+Z / SHIFT+CTRL+Z hierher) ---

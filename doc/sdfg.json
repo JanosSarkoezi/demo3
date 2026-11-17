@@ -1,0 +1,60 @@
+{
+  "objects": [
+    {
+      "id": "68bd99b6-f1c2-4233-962f-de5a05bbf605",
+      "type": "RECTANGLE",
+      "x": 300.0,
+      "y": 440.0,
+      "width": 262.0,
+      "height": 150.0,
+      "layerId": "00000000-0000-0000-0000-000000000000",
+      "content": "",
+      "centered": true
+    },
+    {
+      "id": "d57de206-cd26-4980-9bf0-2b5c58f25769",
+      "type": "EVENT",
+      "x": 365.5,
+      "y": 365.0,
+      "width": 0.0,
+      "height": 0.0,
+      "layerId": "00000000-0000-0000-0000-000000000000",
+      "label": "Ist ein Test",
+      "ownerId": "68bd99b6-f1c2-4233-962f-de5a05bbf605",
+      "side": "RIGHT",
+      "horizontalExtent": 43.0,
+      "verticalRise": 59.0
+    },
+    {
+      "id": "56b9303c-380d-47dd-81c4-3688a322308a",
+      "type": "CIRCLE",
+      "x": 260.0,
+      "y": 260.0,
+      "width": 40.0,
+      "height": 40.0,
+      "layerId": "00000000-0000-0000-0000-000000000000",
+      "label": ""
+    }
+  ],
+  "connections": {
+    "64a7085f-cea1-4892-8f3c-9037cfd533bc": {
+      "sourceId": "56b9303c-380d-47dd-81c4-3688a322308a",
+      "targetId": "68bd99b6-f1c2-4233-962f-de5a05bbf605",
+      "waypointIds": [],
+      "layerId": "00000000-0000-0000-0000-000000000000"
+    }
+  },
+  "layers": [
+    {
+      "id": "00000000-0000-0000-0000-000000000000",
+      "name": "Standard",
+      "visible": true
+    },
+    {
+      "id": "11111111-1111-1111-1111-111111111111",
+      "name": "Wegpunkte",
+      "visible": false
+    }
+  ],
+  "texts": []
+}

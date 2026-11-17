@@ -3,6 +3,67 @@
 Chronik der Arbeitssessions — die neuesten Einträge stehen OBEN. Format: Datum / Was / Warum so / Grenzen & Verbesserungskandidaten.
 (Die aktuelle Architektur-Wahrheit steht in der AGENTS.md — hier nur Entscheidungen und ihre Begründung.)
 
+## 17.11.2026 (25. Arbeitsblock) — Event-Objekt: gebogener Pfeil am R (Modell, Werkzeug, View, Persistenz)
+
+**Was:**
+
+- Neues DiagramObject `Event` (FMC: Ereignis, das am R verarbeitet wird):
+  gebogener Pfeil, der mit der Spitze auf der OBEREN R-Kante andockt (¼ der
+  R-Breite vom Seitenrand), mit Label am Pfadanfang. Vollständiger vertikaler
+  Schnitt: Record + `EventSide`/`EventHandle` + reine Geometrie-Klasse
+  `EventGeometry` (eine Rechen-Wahrheit für Hit-Test, Editor-Anker, Rendering),
+  Service-Schreibpfad (`CreateEvent`/`SetEventLabel`/`ResizeEvent`), Kaskade,
+  Move-Mitnahme, Undo/Redo, `EventToolState` + `EventPathDragState`
+  (Shortcut E), `EventRenderer` + extrahierte `ArrowShape`, Inline-Editor-
+  Zweige, Persistenz-Typ EVENT, Toolbar-Button. 40 neue Tests, 249 gesamt.
+- Form-Griffe nach User-Idee „zwei Ws", aber als RELATIVE Längen umgesetzt:
+  `horizontalExtent` (Ausleger über den Seitenrand) + `verticalRise` (Höhe
+  über der Oberkante) im Record; die Griffpunkte Start/Knick sind abgeleitete
+  Punkte aus EventGeometry (NICHT echte Waypoint-Objekte). Start-Griff zieht
+  nur horizontal, Knick-Griff nur vertikal — achs-gebundener Drag-State mit
+  Preview-Hinweisen, ein Commit beim Loslassen, Klemm-Untergrenze 20 =
+  Bogen-Radius. Standardmaß 40/40, Seite aus der Klickhälfte (links/rechts),
+  Standard rechts.
+- 90°-Bogen am Knick als ¼-Kreis (Tangentenabstand d = min(20, horizontale
+  Länge, vertikale Länge)); die Polyline inkl. Bogenpunkte liefert EventGeometry
+  an Service (Hit) UND View (Rendering) — „wo klickbar" == „wo sichtbar".
+
+**Warum so:**
+
+- Echte Waypoints wären absolute Punkte: Sie blieben beim Move/Resize des R
+  zurück (trotzdem Re-Dock-Logik nötig) und zögen die gesamte W-Maschinerie
+  (Selektionsfilter, RouteEditMode, Kaskaden, Gleiten) an ein Symbol, das
+  keins davon braucht. Relative Längen bekommen Move-mit und Resize-Re-Dock
+  gratis aus der bestehenden Owned-Objekt-Maschinerie; die Achs-Bindung lebt
+  in einem eigenen kleinen Drag-State statt als Sonderfall im generischen
+  Move-Pfad.
+- Spitzen-Position (x/y) Service-geführt wie bei verankerten Texten: bei
+  Erzeugung und jedem Event-Write abgeleitet, R-Resize publiziert das
+  Re-Dock als sichtbaren ObjectsMoved-Eintrag (Präzedenzfall W-Gleiten),
+  der mechanische Restore überspringt still. Undo bleibt dadurch reine
+  Fakten-Ableitung ohne eigenes Kaskade-Wissen.
+- Events sind keine Verbindungsendpunkte: zentrale ConnectionRule (nie in
+  States) + stiller Filter im ConnectingState — der Klick aufs Event läuft
+  wie ein Leerraum-Klick auf einen Kettenpunkt hinaus.
+- Im Auswahl-Werkzeug ist Press-auf-Event reine Selektion (wie Verbindun-
+  gen): Drag wäre gelogen, die Spitze snappt nicht sinnvoll, und das R
+  zieht die Gruppe über die Move-Expansion. Doppelklick auf Event =
+  Label bearbeiten (EditEventLabel), niemals Resize-Modus.
+
+**Grenzen & Verbesserungskandidaten:**
+
+- Formgriffe nur im Event-Werkzeug greifbar; der diskutierte Ctrl+Klick-
+  Zugang aus dem Auswahl-Werkzeug (RouteEditMode-Analogon) ist bewusst
+  NICHT gebaut — erst Alltagstest (User-Entscheidung).
+- Label-Hit-Box geschätzt (7 Welt-Einheiten/Zeichen) statt über die echte
+  View-Messung — für Klickzwecke ausreichend, bei extremen Zoomstufen
+  grob. Kein Text-Umbruch im Label (einzeilig, ENTER committet).
+- Event-Symbole sind nicht verschiebbar und nicht connectbar (beides
+  bewusst); Sichtbarkeits-Steuerung über das kommende Layer-System
+  läuft über die layerId des Owners mit.
+- `mvn test` zum Session-Ende: 249/249 grün (40 neu: EventGeometryTest 7,
+  EventModelTest 16, EventToolTest 10, EventRendererTest 5, PersistenceTest +2).
+
 ## 17.11.2026 (24. Arbeitsblock) — Bugfix: Griff-Hit-Test liest das Ziel frisch (Undo von Move/Resize im Resize-Modus)
 
 **Was:**

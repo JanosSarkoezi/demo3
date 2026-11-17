@@ -212,6 +212,7 @@ public class InputEventTranslator {
             case R -> CustomKeyCode.KEY_R;
             case C -> CustomKeyCode.KEY_C;
             case T -> CustomKeyCode.KEY_T;
+            case E -> CustomKeyCode.KEY_E;
             case ESCAPE -> CustomKeyCode.ESCAPE;
             case DELETE -> CustomKeyCode.DELETE;
             case SPACE -> CustomKeyCode.SPACE;

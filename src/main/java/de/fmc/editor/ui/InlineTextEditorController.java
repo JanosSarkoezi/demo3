@@ -5,6 +5,9 @@ import de.fmc.editor.core.event.ActionEvent;
 import de.fmc.editor.core.model.Circle;
 import de.fmc.editor.core.model.DiagramObject;
 import de.fmc.editor.core.model.DiagramQuery;
+import de.fmc.editor.core.model.Event;
+import de.fmc.editor.core.model.EventGeometry;
+import de.fmc.editor.core.model.EventSide;
 import de.fmc.editor.core.model.Rectangle;
 import de.fmc.editor.core.model.Text;
 import de.fmc.editor.core.model.TextAnchor;
@@ -65,22 +68,28 @@ public class InlineTextEditorController {
         EDIT_RECTANGLE_CONTENT,
         /** Neues Verbindungs-Label am projizierten Anker (Stufe C:
          *  AddAnchoredText — der Service leitet die Position ab). */
-        NEW_CONNECTION_LABEL
+        NEW_CONNECTION_LABEL,
+        /** Neues Event-Label an einem R (17.11.): einzeilig, Commit erzeugt
+         *  das GESAMTE Event über CreateEvent — der Service dockt die Spitze
+         *  aus Owner + Seite ab. Leerer Commit verwirft still. */
+        NEW_EVENT_LABEL,
+        /** Bestehendes Event-Label bearbeiten (einzeilig, SetEventLabel). */
+        EDIT_EVENT_LABEL
     }
 
     /** Alles, was der Commit wissen muss — beim Öffnen eingefroren. */
     private record Session(Kind kind, UUID targetId, UUID ownerId,
                            double worldX, double worldY,
                            double boxWidth, double boxHeight,
-                           String originalContent, TextAnchor anchor) {
+                           String originalContent, TextAnchor anchor, EventSide side) {
 
-        /** Komfort-Konstruktor: Sessions ohne Anker (alle Editor-Arten
-         *  außer dem Verbindungs-Label) geben null durch. */
+        /** Komfort-Konstruktor: Sessions ohne Anker und Seitenlage (alle
+         *  Editor-Arten außer Verbindungs- und Event-Label) geben null durch. */
         Session(Kind kind, UUID targetId, UUID ownerId,
                 double worldX, double worldY,
                 double boxWidth, double boxHeight, String originalContent) {
             this(kind, targetId, ownerId, worldX, worldY,
-                    boxWidth, boxHeight, originalContent, null);
+                    boxWidth, boxHeight, originalContent, null, null);
         }
     }
 
@@ -128,6 +137,10 @@ public class InlineTextEditorController {
         bus.subscribe(ActionEvent.EditText.class, e -> onEditText(e.textId()));
         bus.subscribe(ActionEvent.CreateConnectionText.class,
                 e -> onCreateConnectionText(e.connectionId(), e.anchor()));
+        // Event-Label-Intents des Event-Werkzeugs (17.11.).
+        bus.subscribe(ActionEvent.CreateEventFor.class,
+                e -> onCreateEventFor(e.ownerId(), e.side(), e.worldX(), e.worldY()));
+        bus.subscribe(ActionEvent.EditEventLabel.class, e -> onEditEventLabel(e.eventId()));
 
         // Klick-daneben-committet — VOR dem Übersetzer registriert (Main
         // konstruiert uns zuerst), damit der konsumierte Klick den Kern
@@ -235,7 +248,44 @@ public class InlineTextEditorController {
         double worldX = camera.screenToWorldX(mouseState.getScreenX());
         double worldY = camera.screenToWorldY(mouseState.getScreenY());
         openMultiline(new Session(Kind.NEW_CONNECTION_LABEL, null, connectionId,
-                worldX, worldY, NEW_TEXT_BOX_WIDTH, NEW_TEXT_BOX_HEIGHT, "", anchor), "");
+                worldX, worldY, NEW_TEXT_BOX_WIDTH, NEW_TEXT_BOX_HEIGHT, "", anchor, null), "");
+    }
+
+    /**
+     * Neues Event-Label (17.11.): Der Werkzeug-Intent trägt Owner, Seite und
+     * den Label-Anker (EventGeometry = die eine Rechen-Wahrheit im Kern).
+     * Der Editor öffnet dort; das Modell entsteht erst beim Commit über
+     * CreateEvent — leerer Commit verwirft still (kein leeres Objekt,
+     * User-Entscheidung 17.11.), ESC ebenso.
+     */
+    private void onCreateEventFor(UUID ownerId, EventSide side, double worldX, double worldY) {
+        if (editorNode != null || ownerId == null) {
+            return; // Unreachable (Werkzeug prüft) — defensiv.
+        }
+        openSingleLine(new Session(Kind.NEW_EVENT_LABEL, null, ownerId,
+                worldX, worldY, 0, 0, "", null, side), "");
+    }
+
+    /**
+     * Bestehendes Event-Label nachbearbeiten: Anker und Inhalt FRISCH aus
+     * dem Modell (das Event kann seit dem Intent bewegt/geformt worden
+     * sein — dieselbe Frisch-Lese-Disziplin wie beim R-Inhalt).
+     */
+    private void onEditEventLabel(UUID eventId) {
+        if (editorNode != null) {
+            return;
+        }
+        if (!(diagram.findById(eventId).orElse(null) instanceof Event event)) {
+            return;
+        }
+        if (!(diagram.findById(event.ownerId()).orElse(null) instanceof Rectangle owner)) {
+            return; // Kaskaden-Fenster: ohne Owner kein Label-Anker
+        }
+        double[] anchor = EventGeometry.labelAnchor(owner, event.side(),
+                event.horizontalExtent(), event.verticalRise());
+        openSingleLine(new Session(Kind.EDIT_EVENT_LABEL, event.id(), event.ownerId(),
+                anchor[0], anchor[1], 0, 0, event.label(), null, event.side()),
+                event.label());
     }
 
     // ---------- Editor-Aufbau (die EINE Komponente, zwei Node-Typen) ----------
@@ -262,22 +312,42 @@ public class InlineTextEditorController {
         // FMC-Konvention: genau EIN Buchstabe — mehr nimmt das Feld nicht an.
         field.setTextFormatter(new TextFormatter<>(change ->
                 change.getControlNewText().length() <= 1 ? change : null));
-        field.setOnKeyPressed(this::onSingleCharKey);
+        field.setOnKeyPressed(this::onSingleLineKey);
         show(openSession, field);
         field.selectAll();
     }
 
+    /** Einzeiligen Editor für Event-Label (17.11.): freier Text, ENTER
+     *  committet (wie beim K-Buchstaben), kein Zeilenumbruch. */
+    private void openSingleLine(Session openSession, String initialContent) {
+        TextField field = new TextField(initialContent);
+        field.setFont(EDITOR_FONT);
+        field.setStyle(EDITOR_STYLE);
+        field.setPrefSize(160, 30);
+        field.setOnKeyPressed(this::onSingleLineKey);
+        show(openSession, field);
+        if (initialContent.isEmpty()) {
+            field.positionCaret(0);
+        } else {
+            field.selectAll(); // Bestehendes Label zum Überschreiben anbieten.
+        }
+    }
+
     /** Gemeinsames Zeigen: Größe (Screen = Welt-Box × Zoom), Position,
-     *  Overlay, Fokus. Single-char-Felder haben keine Welt-Box. */
+     *  Overlay, Fokus. Felder mit fester Screen-Größe (K-Buchstabe,
+     *  Event-Label) nutzen ihre Pref-Size statt einer Welt-Box. */
     private void show(Session openSession, TextInputControl control) {
+        boolean fixedScreenSize = openSession.kind() == Kind.CIRCLE_LABEL
+                || openSession.kind() == Kind.NEW_EVENT_LABEL
+                || openSession.kind() == Kind.EDIT_EVENT_LABEL;
         CameraInfo camera = bus.getCameraInfo();
-        double screenW = openSession.kind() == Kind.CIRCLE_LABEL
+        double screenW = fixedScreenSize
                 ? control.getPrefWidth()
                 : openSession.boxWidth() * camera.zoom();
-        double screenH = openSession.kind() == Kind.CIRCLE_LABEL
+        double screenH = fixedScreenSize
                 ? control.getPrefHeight()
                 : openSession.boxHeight() * camera.zoom();
-        if (openSession.kind() != Kind.CIRCLE_LABEL) {
+        if (!fixedScreenSize) {
             control.setPrefSize(screenW, screenH);
         }
         // Stufe B: Über einem sehr kleinen R wäre ein Innenbox-großer Editor
@@ -316,7 +386,7 @@ public class InlineTextEditorController {
         }
     }
 
-    private void onSingleCharKey(KeyEvent event) {
+    private void onSingleLineKey(KeyEvent event) {
         switch (event.getCode()) {
             case ESCAPE -> {
                 event.consume();
@@ -385,6 +455,25 @@ public class InlineTextEditorController {
                             content, commitSession.anchor(),
                             commitSession.boxWidth(), commitSession.boxHeight(),
                             bus.getCameraInfo().defaultLayerId()));
+                }
+            }
+            case NEW_EVENT_LABEL -> {
+                // Erst der Commit erzeugt das Event (CreateEvent): Der
+                // Service validiert den Owner und dockt die Spitze ab.
+                // Leer-Commit = stiller Verwurf, kein leeres Objekt
+                // (User-Entscheidung 17.11., konsistent mit dem Text-Werkzeug).
+                if (!content.isBlank()) {
+                    bus.publish(new ActionEvent.CreateEvent(
+                            commitSession.ownerId(), commitSession.side(), content));
+                }
+            }
+            case EDIT_EVENT_LABEL -> {
+                // Nur bei Änderung wirkt sich die Eingabe aus (wie beim
+                // K-Buchstaben); ein geleertes Feld löscht das Label —
+                // gültige Änderung, das Symbol bleibt.
+                if (!content.equals(commitSession.originalContent())) {
+                    bus.publish(new ActionEvent.SetEventLabel(
+                            commitSession.targetId(), content));
                 }
             }
         }

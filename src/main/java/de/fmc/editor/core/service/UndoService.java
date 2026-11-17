@@ -7,6 +7,7 @@ import de.fmc.editor.core.event.InputEvent;
 import de.fmc.editor.core.model.Circle;
 import de.fmc.editor.core.model.Connection;
 import de.fmc.editor.core.model.DiagramObject;
+import de.fmc.editor.core.model.Event;
 import de.fmc.editor.core.model.Rectangle;
 import de.fmc.editor.core.model.Text;
 import de.fmc.editor.core.model.Waypoint;
@@ -306,6 +307,10 @@ public class UndoService {
             case Circle c -> new ActionEvent.ResizeCircle(c.id(), c.radius());
             case Rectangle r -> new ActionEvent.ResizeBox(r.id(), r.width(), r.height());
             case Text t -> new ActionEvent.ResizeBox(t.id(), t.width(), t.height());
+            // Events: Form = die zwei Segmentlängen; die Spitze dockt der
+            // Service daraus wieder ans R ab (Ableitung, kein Restore-Wert).
+            case Event e -> new ActionEvent.ResizeEvent(
+                    e.id(), e.horizontalExtent(), e.verticalRise());
             // Waypoints haben keine Handles — der Service ignoriert das still.
             case Waypoint w -> new ActionEvent.ResizeBox(w.id(), 0.0, 0.0);
         };
@@ -336,6 +341,8 @@ public class UndoService {
             }
             // Waypoints tragen keinen Text.
             case Waypoint w -> { }
+            // Event-Label: mechanisches Zurückschreiben wie beim K-Buchstaben.
+            case Event e -> bus.publish(new ActionEvent.SetEventLabel(e.id(), e.label()));
         }
     }
 }

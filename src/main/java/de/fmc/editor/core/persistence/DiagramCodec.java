@@ -5,6 +5,9 @@ import de.fmc.editor.core.model.Circle;
 import de.fmc.editor.core.model.Connection;
 import de.fmc.editor.core.model.DiagramObject;
 import de.fmc.editor.core.model.DiagramQuery;
+import de.fmc.editor.core.model.Event;
+import de.fmc.editor.core.model.EventGeometry;
+import de.fmc.editor.core.model.EventSide;
 import de.fmc.editor.core.model.Rectangle;
 import de.fmc.editor.core.model.Text;
 import de.fmc.editor.core.model.Waypoint;
@@ -59,13 +62,21 @@ public final class DiagramCodec {
             switch (obj) {
                 case Circle c -> objects.add(new PersistedObject(c.id(), PersistedObjectType.CIRCLE,
                         c.x(), c.y(), c.radius() * 2.0, c.radius() * 2.0, c.layerId(),
-                        c.label(), null, null));
+                        c.label(), null, null, null, null, null, null));
                 case Rectangle r -> objects.add(new PersistedObject(r.id(), PersistedObjectType.RECTANGLE,
                         r.x(), r.y(), r.width(), r.height(), r.layerId(),
-                        null, r.content(), r.centered()));
+                        null, r.content(), r.centered(), null, null, null, null));
                 case Waypoint w -> objects.add(new PersistedObject(w.id(), PersistedObjectType.WAYPOINT,
                         w.x(), w.y(), WAYPOINT_BOX_SIZE, WAYPOINT_BOX_SIZE, w.layerId(),
-                        null, null, null));
+                        null, null, null, null, null, null, null));
+                // Events: Maße irrelevant (Geometrie abgeleitet) — gespeichert
+                // werden Owner, Seite, Label und die zwei Form-Längen; die
+                // Spitzen-Position läuft als abgeleiteter Wert mit und wird
+                // beim Laden neu abgeleitet.
+                case Event e -> objects.add(new PersistedObject(e.id(), PersistedObjectType.EVENT,
+                        e.x(), e.y(), 0.0, 0.0, e.layerId(),
+                        e.label(), null, null, e.ownerId(), e.side().name(),
+                        e.horizontalExtent(), e.verticalRise()));
                 case Text t -> texts.add(new PersistedText(t.id(), t.content(), t.x(), t.y(),
                         t.width(), t.height(), t.anchor(), t.ownerId(), t.layerId()));
             }
@@ -90,15 +101,27 @@ public final class DiagramCodec {
             if (dto == null || dto.id() == null || dto.type() == null) {
                 continue; // Defekten Eintrag still überspringen — kein Crash
             }
-            DiagramObject mapped = switch (dto.type()) {
-                case CIRCLE -> new Circle(dto.id(), dto.x(), dto.y(), circleRadius(dto),
-                        dto.label(), layerId(dto.layerId()));
-                case RECTANGLE -> new Rectangle(dto.id(), dto.x(), dto.y(), dto.width(), dto.height(),
+            switch (dto.type()) {
+                case CIRCLE -> objects.add(new Circle(dto.id(), dto.x(), dto.y(), circleRadius(dto),
+                        dto.label(), layerId(dto.layerId())));
+                case RECTANGLE -> objects.add(new Rectangle(dto.id(), dto.x(), dto.y(), dto.width(), dto.height(),
                         dto.content(), dto.centered() == null || dto.centered(),
-                        layerId(dto.layerId()));
-                case WAYPOINT -> new Waypoint(dto.id(), dto.x(), dto.y(), layerId(dto.layerId()));
-            };
-            objects.add(mapped);
+                        layerId(dto.layerId())));
+                case WAYPOINT -> objects.add(new Waypoint(dto.id(), dto.x(), dto.y(), layerId(dto.layerId())));
+                // Event ohne Owner ist defekt (still übersprungen); Seite
+                // ungültig/fehlend -> RIGHT (Standard); Form-Längen
+                // fehlend/ungültig -> 40/40 (demo3-Defaults). x/y läuft mit
+                // — der DiagramService dockt die Spitze beim Laden frisch ab.
+                case EVENT -> {
+                    if (dto.ownerId() == null) {
+                        continue;
+                    }
+                    objects.add(new Event(dto.id(), dto.ownerId(), tolerantSide(dto.side()),
+                            dto.label(), tolerantExtent(dto.horizontalExtent()),
+                            tolerantExtent(dto.verticalRise()),
+                            dto.x(), dto.y(), layerId(dto.layerId())));
+                }
+            }
         }
         for (PersistedText dto : data.texts()) {
             if (dto == null || dto.id() == null) {
@@ -129,5 +152,17 @@ public final class DiagramCodec {
      *  der Standard-Ebene — das Modell hält nie null als Ebene. */
     private static UUID layerId(UUID layerId) {
         return layerId != null ? layerId : PersistedLayers.STANDARD_LAYER_ID;
+    }
+
+    /** Seitenlage tolerant gelesen: unbekannt/fehlend -> RIGHT (Standard). */
+    private static EventSide tolerantSide(String side) {
+        return "LEFT".equalsIgnoreCase(side) ? EventSide.LEFT : EventSide.RIGHT;
+    }
+
+    /** Form-Länge tolerant gelesen: fehlend/ungültig -> demo3-Default 40. */
+    private static double tolerantExtent(Double extent) {
+        return extent != null && Double.isFinite(extent) && extent > 0.0
+                ? extent
+                : EventGeometry.DEFAULT_EXTENT;
     }
 }

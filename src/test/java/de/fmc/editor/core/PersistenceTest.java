@@ -4,6 +4,8 @@ import de.fmc.editor.core.event.ActionEvent;
 import de.fmc.editor.core.event.DiagramEvent;
 import de.fmc.editor.core.model.Circle;
 import de.fmc.editor.core.model.Connection;
+import de.fmc.editor.core.model.Event;
+import de.fmc.editor.core.model.EventSide;
 import de.fmc.editor.core.model.Rectangle;
 import de.fmc.editor.core.model.Text;
 import de.fmc.editor.core.model.TextAnchor;
@@ -238,5 +240,70 @@ class PersistenceTest extends BusTestSupport {
         assertThatThrownBy(() -> PersistenceService.loadDiagram(
                 new StringReader("kein json")))
                 .isInstanceOf(RuntimeException.class);
+    }
+
+    @Test
+    void eventRoundTripPreservesOwnerSideShapeAndLabel() {
+        Rectangle rect = addRectangle(300.0, 400.0); // 40×30
+        bus.publish(new ActionEvent.CreateEvent(rect.id(), EventSide.LEFT, "Bestellung"));
+        // Gezogene Form (User-Formgriff) muss genauso überleben wie das Label.
+        bus.publish(new ActionEvent.ResizeEvent(
+                ((Event) diagram.allObjectsInZOrder().get(1)).id(), 66.0, 77.0));
+        closeGesture();
+        Event event = (Event) diagram.allObjectsInZOrder().get(1);
+
+        // Export: Event als Objekt mit Owner/Seite/Form-Längen; Maße bleiben
+        // leer (Geometrie ist abgeleitet).
+        PersistedDiagram dto = DiagramCodec.export(diagram);
+        PersistedObject eventDto = dto.objects().get(1);
+        assertThat(eventDto.type()).isEqualTo(PersistedObjectType.EVENT);
+        assertThat(eventDto.ownerId()).isEqualTo(rect.id());
+        assertThat(eventDto.side()).isEqualTo("LEFT");
+        assertThat(eventDto.label()).isEqualTo("Bestellung");
+        assertThat(eventDto.horizontalExtent()).isEqualTo(66.0);
+        assertThat(eventDto.verticalRise()).isEqualTo(77.0);
+
+        // Gson-Roundtrip über einen String und zurück auf den Bus.
+        StringWriter buffer = new StringWriter();
+        PersistenceService.saveDiagram(dto, buffer);
+        PersistedDiagram reloaded = PersistenceService.loadDiagram(
+                new StringReader(buffer.toString()));
+        load(DiagramCodec.toLoadRequest(reloaded));
+
+        // Alles wieder da: Owner, Seite, Label, gezogene Form — und die
+        // Spitze frisch abgedockt (x = 300 - 40/4 = 290, y = Oberkante 385).
+        Event loaded = (Event) diagram.findById(event.id()).orElseThrow();
+        assertThat(loaded.ownerId()).isEqualTo(rect.id());
+        assertThat(loaded.side()).isEqualTo(EventSide.LEFT);
+        assertThat(loaded.label()).isEqualTo("Bestellung");
+        assertThat(loaded.horizontalExtent()).isEqualTo(66.0);
+        assertThat(loaded.verticalRise()).isEqualTo(77.0);
+        assertThat(loaded.x()).isEqualTo(290.0);
+        assertThat(loaded.y()).isEqualTo(385.0);
+    }
+
+    @Test
+    void eventToleratesMissingFieldsAndDefects() {
+        // Fehlende Seite/Form-Längen -> demo3-Defaults (RIGHT, 40/40);
+        // fehlender Owner macht den Eintrag DEFECT (still übersprungen).
+        load(DiagramCodec.toLoadRequest(PersistenceService.loadDiagram(new StringReader("""
+                {"objects": [
+                  {"id":"bbbbbbbb-0000-0000-0000-000000000001","type":"RECTANGLE","x":100.0,"y":100.0,"width":40.0,"height":30.0},
+                  {"id":"bbbbbbbb-0000-0000-0000-000000000002","type":"EVENT","ownerId":"bbbbbbbb-0000-0000-0000-000000000001","label":"E","side":"QUATSCH"},
+                  {"id":"bbbbbbbb-0000-0000-0000-000000000003","type":"EVENT","label":"Waisenkind"}
+                ]}
+                """))));
+        assertThat(diagram.allObjectsInZOrder()).hasSize(2); // R + 1 Event
+
+        Event loaded = (Event) diagram
+                .findById(UUID.fromString("bbbbbbbb-0000-0000-0000-000000000002"))
+                .orElseThrow();
+        assertThat(loaded.side()).isEqualTo(EventSide.RIGHT); // ungültig -> Standard
+        assertThat(loaded.horizontalExtent()).isEqualTo(40.0); // fehlend -> Default
+        assertThat(loaded.verticalRise()).isEqualTo(40.0);
+        assertThat(loaded.label()).isEqualTo("E");
+        // Ohne Owner kein Event (Defekt übersprungen, kein Crash).
+        assertThat(diagram.findById(UUID.fromString("bbbbbbbb-0000-0000-0000-000000000003")))
+                .isEmpty();
     }
 }
