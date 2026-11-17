@@ -3,6 +3,370 @@
 Chronik der Arbeitssessions — die neuesten Einträge stehen OBEN. Format: Datum / Was / Warum so / Grenzen & Verbesserungskandidaten.
 (Die aktuelle Architektur-Wahrheit steht in der AGENTS.md — hier nur Entscheidungen und ihre Begründung.)
 
+## 26.11.2026 (30. Arbeitsblock) — Vier-Quadranten-Modell: Klick wählt Richtung und Seite (Shift fällt weg)
+
+**Was:**
+
+- **Ablösung des Shift-Modifiers (nur Stunden nach seiner Einführung):**
+  Im Event-Werkzeug liest sich das R jetzt als Vier-Quadranten-
+  Platzierungspad: Die VERTIKALE Klickhälfte adressiert die Richtung
+  (oben = IE — die Spitze dockt ja oben an; unten = OE — der Fuß
+  startet unten; die Mittellinie gehört zur unteren Hälfte), die
+  HORIZONTALE die Seite. Pro adressiertem Event gilt EINE Regel:
+  fehlt es → Erstellen (auch das OE jetzt ohne Modifier), sitzt es auf
+  der anderen Seite → Umziehen (SetEventSide + Label-Spiegelung,
+  unverändert), sitzt es genau dort → Label bearbeiten.
+- **Auslöser (User-Befund):** Mit IE+OE am selben R schien das OE per
+  R-Klick nicht positionierbar. Erreichbar war es zwar (Shift+Klick auf
+  die gegenüberliegende Hälfte flippte es — getestet), aber die doppelte
+  Indirektion (Modifier + „andere Hälfte") ist unentdeckbar: Selbst der
+  Autor der Shift-Semantik fand die Geste nicht wieder. User-
+  Entscheidungsfindung mit zwei Optionen (Quadranten vs. Shift
+  behalten); bewusste Abkehr von seiner anfänglichen Shift-Präferenz.
+- **Kern-Änderung minimal:** Nur die Aktion der EINEN Press-Regel im
+  `EventToolState` — neuer Helfer `clickedDirection(owner, worldY)`
+  analog zum bestehenden `clickedSide`; Guard-Disjunktheit unberührt.
+  Service (SetEventSide/CreateEvent), Undo-Komposition, Geometrie,
+  View: null Änderung.
+- **`shiftDown` am MousePressed-Record bleibt**, wird aber nicht mehr
+  ausgewertet (bewusst tot statt optional) — Regressionstest sichert
+  das Verhalten.
+
+**Warum so:**
+
+- Direkte Manipulation schlägt Modifier: „Klick dorthin, wo der Pfeil
+  sitzen soll" ist selbst erklärend — die Metapher stimmt sogar
+  räumlich (das obere Viertel gehört zum Pfeil, der oben andockt). Der
+  Shift-Weg wäre null Aufwand gewesen (er lief bereits), aber
+  Entdeckbarkeit ist ein Strukturproblem, kein Dokumentationsproblem.
+- Verworfener Hybrid („Quadrant nur fürs Umziehen, OE-Erstellung
+  shift-gated"): Derselbe Klick hätte je nach Modellzustand zwei
+  Bedeutungen gehabt — inkohärent.
+
+**Grenzen & Verbesserungskandidaten:**
+
+- **Versehentliche OE-Erstellung:** Klick in die untere R-Hälfte ohne
+  bestehendes OE erstellt jetzt eins (vorher unmöglich ohne Shift) —
+  billig rücknehmbar via ESC/Undo, im Alltagstest beobachten.
+- **Hit-Toleranz-Falle beim Testen:** Neue Press-Punkte in Gesten-Tests
+  müssen außerhalb der Pfad-Hit-Toleranz
+  (`EventGeometry.HIT_TOLERANCE` = 5) liegen — 110/90 hätte EXAKT auf
+  der Toleranzgrenze zur IE-Spitze (110/85) gesessen und den Pfad
+  statt des R getroffen; der Test wäre durch den FALSCHEN Branch (b
+  statt c) grün geworden. Gewählt: 110/95 und 90/95 (Abstand 10 bzw.
+  22). Merksatz für künftige Gesten-Tests: Prüfen, WELCHER Branch
+  antwortet — nicht nur, ob die Intents stimmen.
+- **Kleinere Klickziele:** Minimales R = 1 Grid-Zelle → Quadranten
+  ~10×10 Welt-Einheiten, vergleichbar mit den 6-px-Formgriffen —
+  machbar, bei flachen R's eng.
+- Optionaler Nachzug: Hover-Affordanz im Event-Werkzeug, die das
+  adressierte Quadrant andeutet (Cursor-Hint oder dezente Fläche).
+- `mvn clean test`: 271/271 grün (Netto +2: vier Shift-Tests durch
+  sechs Quadranten-Tests ersetzt).
+
+## 26.11.2026 (29. Arbeitsblock) — Bugfix: OUTGOING-Event kippte bei R-Move auf INCOMING
+
+**Was:**
+
+- **User-Befund verifiziert:** Neues ausgehendes Event am R erstellt, R
+  bewegt → der Pfeil sprang nach oben und wurde eingehend; das Label
+  blieb an der Stelle, die zum ausgehenden Event gehörte.
+- **Root cause:** `DiagramService.moved()` — die EINE Kopier-Hilfe für
+  ALLE Move-Pfade (Geste `MoveObject`/`MoveObjects` wie auch
+  `applyMove` für `MoveObjectTo` = Restore/Undo-Replay) — baute Events
+  über den Kompatibilitäts-Konstruktor OHNE `direction` neu; der
+  defaultet still auf INCOMING. Der Renderer leitet die Form aus
+  Owner + Seite + RICHTUNG ab (gespeichertes x/y ignoriert) → das
+  Umkippen war sofort sichtbar; das Label (normales Text-Objekt)
+  wanderte korrekt mit dem Delta und blieb dadurch scheinbar „an der
+  alten Stelle" zurück.
+- **Fix:** Einzeiler — `e.direction()` in den vollen Konstruktor der
+  moved()-Kopie. Deckt Geste, Undo/Redo und Restore ab, weil alle Pfade
+  durch dieselbe Hilfsmethode laufen (per Test verifiziert, nicht per
+  Annahme).
+- **Regressionstest** `moveWithOwnerPreservesDirection` im
+  EventModelTest: schickt ein OUTGOING-Event durch `MoveObjects`
+  (Gesten-Pfad) UND Undo/Redo (mechanischer Restore-Pfad), Asserts auf
+  Richtung, Andock an der Unterkante und Label-Delta.
+
+**Warum so:**
+
+- Ironie des Falls: Der Kommentar ÜBER moved() warnt exakt davor
+  („die Kompatibilitäts-Konstruktoren würden sie sonst still
+  zurücksetzen") — er stammt von den Text-Feld-Additions an
+  Circle/Rectangle (28.10.) und wurde beim direction-Feld (26.11.)
+  nicht an der Event-Kopier-Stelle beherzigt. Zweiter Biss desselben
+  Musters in einem Monat → als lokaler Skill
+  `record-compat-constructor-field-loss` destilliert: Prozedur
+  „nach Feld-Addition alle `new X(`-Stellen grep-en, jede auf den
+  VOLLSTÄNDIGEN Konstruktor prüfen, pro Kopier-Pfad einen Test, der
+  das NEUE Feld (nicht nur Positionen) durch den Round-Trip schickt".
+  Ein Warntext an EINER Stelle schützt neue Felder an ANDEREN nicht.
+- Kein View-Fix nötig: Renderer und Ableitung waren korrekt — das
+  Modell war korrupt.
+
+**Grenzen & Verbesserungskandidaten:**
+
+- Der Kompat-Konstruktor ohne `direction` bleibt bestehen
+  (Bestands-Fixtures, doctored-Load-Test): Sein Default INCOMING ist
+  eine Altdaten-Entscheidung und ist falsch für alle Objekte, die
+  NACH dem 26.11. erzeugt wurden — künftige Feld-Additions am Event
+  erneut per Skill-Prozedur auditieren.
+- `mvn clean test` zum Session-Ende: 269/269 grün (Netto +1).
+
+## 26.11.2026 (28. Arbeitsblock) — Event-Richtungen: OUTGOING (unten raus) neben INCOMING (oben rein)
+
+**Was:**
+
+- **Zweite Event-Richtung (User-Anforderung):** Ein R kann jetzt JE
+  RICHTUNG 0..1 Events tragen — INCOMING (bisheriges Verhalten: Spitze
+  dockt an der OBEREN Kante an, Pfeil zeigt in R) und OUTGOING (Fuß
+  startet an der UNTEREN Kante bei ¼ der Breite, senkrecht runter,
+  90°-Bogen, horizontal raus, Pfeilspitze am äußeren Ende waagrecht
+  nach außen). FMC-Lesart: rein oben, raus unten. Beide koexistieren
+  am selben R mit JE einer eigenen Label-Textbox (Kette R → E → Text).
+- **Geste:** Bleibt im Event-Werkzeug (E) — **Shift+Klick** bedient
+  OUTGOING, normaler Klick INCOMING. Die dreigeteilte Press-Logik
+  (Erstellen / Label bearbeiten / Umziehen per Spiegelung) läuft je
+  Richtung getrennt; das Event der anderen Richtung bleibt unberührt.
+  Dafür bekam `InputEvent.MousePressed` ein `shiftDown`-Feld
+  (Kompatibilitäts-Konstruktoren, Übersetzer reicht `isShiftDown()`
+  durch).
+- **Geometrie-Trick (der elegante Teil):** KEINE zweite Geometrie-
+  Implementierung. `EventGeometry` fährt dieselbe Punktberechnung mit
+  einem Vorzeichen aus `EventDirection.verticalSign()` (Andockkante,
+  Knick-Versatz, Bogenseite folgen allein daraus) und dreht für
+  OUTGOING nur die Punktliste UM (`Collections.reverse`). Weil der
+  Renderer die Pfeilspitze am LETZTEN Segment orientiert, zeigt sie
+  bei Incoming automatisch nach unten in R, bei Outgoing waagrecht
+  nach außen — `EventRenderer` blieb bis auf den Richtungs-Durchreich
+  unverändert. Hit-Test, Bounds, Formgriffe: selbe Punkteliste.
+- **Label-Anker OUTGOING:** Mitte des äußeren SEGMENTS (Knick → Ende),
+  unterhalb — das Ende gehört der Pfeilspitze. Erste Version hatte
+  „Knick + extent/2" gerechnet; da der Arm am Knick INNERHALB des R
+  beginnt, wäre das nicht die echte Segment-Mitte (Test 135 vs. 130
+  hätte es entlarvt) — auf (kink+end)/2 korrigiert, BEVOR der Test
+  das erste Mal lief.
+- **Persistenz:** `direction`-Feld am EVENT-Typ (PersistedObject),
+  tolerant gelesen — Default INCOMING für Dateien vor dem 26.11.,
+  unbekannte Werte ebenso. Die 17.11.-Label-Migration leitet ihren
+  Anker immer als INCOMING ab (alte Dateien kannten nur die).
+- **Modell-Disziplin:** `direction` als Enum-Feld am bestehenden
+  Event-Record (kein zweiter Objekttyp) — Kompatibilitäts-Konstruktor
+  (Default INCOMING) hält Bestands-Fixtures und Restore-Pfade grün,
+  null-normalisierender Compact Constructor zieht denselben Default
+  im toleranten Lade-Pfad. Undo/Redo unverändert: Die Fakten tragen
+  das ganze Record, SetEventSide/ResizeEvent sind richtungsagnostisch,
+  Kaskade/Move-Expansion/Flip-Spiegelung funktionieren ohne Änderung.
+
+**Warum so:**
+
+- Richtung als Feld statt Typ: Alles außer der Polyline ist identisch
+  (Kaskade, Move-Kette, Undo, Griffe, Flip) — ein zweiter Objekttyp
+  würde all das duplizieren oder per Vererbung verdrauten müssen.
+- Spiegelung + Reversing statt Zweitrechnung: eine Rechen-Wahrheit
+  bleibt gewahrt („klickbar == sichtbar" für BEIDE Richtungen aus
+  derselben Quelle), und Consumer, die am letzten Segment orientieren,
+  bekommen die Richtung gratis.
+- Shift+Klick wie vom User vorgeschlagen: kein Modus-Wechsel, kein
+  zweites Werkzeug — der Modifier ist die Richtungswahl.
+- 0..1 je Richtung (User-Bestätigung): FMC-typisch hat ein Speicher
+  Zu- UND Abfluss; die Kardinalitätsprüfung im Service filtert nach
+  Richtung (`hasEventOfDirection`).
+
+**Grenzen & Verbesserungskandidaten:**
+
+- Shift+Klick greift nicht, wenn der Klick auf den PFAD des Events der
+  ANDEREN Richtung fällt (dann übernimmt der Pfad-Hit → EditEventLabel
+  des getroffenen Events) — im Alltagstest beobachten; ggf. Richtung
+  des Pfad-Treffers gegen den Modifier prüfen.
+- Formgriffe beider Richtungen sind gleichzeitig sichtbar/griffig (im
+  Event-Werkzeug) — bei überlappenden Formen könnte der Griff des
+  unteren Events schwer treffen; oberstes zuerst greift heute.
+- `mvn clean test` zum Session-Ende: 268/268 grün (Netto +11:
+  Geometrie-Spiegelung/Anker, Outgoing-Modell/Koexistenz, Shift-
+  Gesten, Renderer-Winkel 0°/180°, Persistenz-Roundtrip + Legacy-
+  Default).
+
+## 23.11.2026 (27. Arbeitsblock) — Flip per Spiegelung, View-Fix „Pfeil klebt nach Undo", Maven-Stale-Falle
+
+**Was:**
+
+- **Umziehen per SPIEGELUNG statt Delta-Wanderung** (User-Idee): Beim
+  Seitentausch hängt die Geste jetzt `MoveObjectTo` mit
+  `newX = 2·R.x − label.x` an (y unverändert — Spiegelung an der
+  VERTIKALEN Achse), statt das Label um das Spitzen-Delta zu schieben.
+  Begründung: Der Pfeil selbst ist exakt diese Spiegelung (Spitze x±w/4,
+  Start am Seitenrand ± Ausleger) — die Spiegelung erhält die relative
+  Lage des Labels zum Pfeil; die Delta-Wanderung ließe ein weit gezogenes
+  Label auf der ALTEN Seite zurück (Test: Label bei x=300 → Spiegel −100
+  statt Delta 280). Absolute Position = zugleich das präzise Inverse.
+- **View-Fix „Pfeil klebt nach Undo des R-Moves"** (User-Fund, verifiziert):
+  R erstellen, E erstellen, R ziehen, Undo — der Pfeil blieb auf der
+  neuen Position, nur R und Label kehrten zurück. Diagnose: Modell war
+  die ganze Zeit korrekt (der Service-Test bewies die Restore-Position);
+  `EventRenderer` leitet die Pfeilgeometrie aus dem OWNER ab, aber
+  `GraphView.onObjectsMoved` frischte Event-Nodes nur über deren EIGENEN
+  Move-Eintrag — die inverse Wiedergabe läuft aber RÜCKWÄRTS (label → E
+  → R): E's Eintrag zeichnet gegen den noch-neuen R, und der letzte
+  Schritt (R-Restore) aktualisierte die gedockten Events nicht. Fix:
+  Owner-Hook im Move-Pfad (`refreshEventNodesAgainst`), den der Resize-
+  Pfad bereits hatte. Regressionstest `EventOwnerRefreshTest` (headless,
+  3 Tests) inkl. NEGATIVE probe über einen Verifikations-Schalter — mit
+  ausgeschaltetem Hook reproduziert der Test exakt den User-Befund.
+- **Maven-Stale-Falle** (Session-Fund, ~10 Iterationen Debugging): Der
+  maven-compiler-plugin-Inkrementalcompiler hat mehrfach geänderte Test-
+  Quellen NICHT neu kompiliert („Nothing to compile - all classes are up
+  to date") — Surefire lieferte weiterhin die ALTE Klasse, und die
+  Report-Zeilennummern entsprachen nicht mehr der Quelle. Das erzeugte
+  „logisch unmögliche" Testergebnisse (Assertationen schienen zu passen,
+  die Zeile scheiterte trotzdem). Merksatz: Wenn iterative Testläufe der
+  statischen Code-Analyse widersprechen, ZUERST `mvn clean` — und
+  Report-Zeilennummern gegen die aktuelle Quelle halten.
+
+**Warum so:**
+
+- Spiegelung als Geste-Komposition (nicht im Service): dieselbe Regel wie
+  beim letzten Schnitt — der Service bleibt single-effect, das Undo bleibt
+  rein mechanisch (MoveObjectTo-Inverse = exakte Alt-Position).
+- Der View-Fix ist bewusst symmetrisch zum Resize-Pfad angelegt: JEDE
+  Owner-Geometrie-Änderung (Move wie Resize, aus jeder Quelle) frischt
+  die owner-derivierten Nodes. Damit konvergiert die View gegen jede
+  Fakt-Reihenfolge — dieselbe Disziplin, die addObjectNode für
+  Verbindungen schon hatte.
+
+**Grenzen & Verbesserungskandidaten:**
+
+- Der Verifikations-Schalter `REFRESH_OWNER_DERIVED_NODES` bleibt als
+  package-private Test-Hook im Produktionscode (dokumentiert, immer true)
+  — Preis für die scharfe Negative Probe ohne Reflexion.
+- Flip öffnet weiterhin KEINEN Editor (reine Positions-Geste); das weit
+  gezogene Label-Beispiel zeigt, dass Spiegelung intuitiv ist — im
+  Alltagstest bestätigen.
+- `mvn clean test` zum Session-Ende: 257/257 grün (Netto +4: Flip-
+  Spiegelungs-Tests umgestellt/erweitert, EventOwnerRefreshTest 3 neu).
+
+## 23.11.2026 (26. Arbeitsblock) — Event: Kardinalität 0..1, Seitentausch, Label als eigene Textbox (R → E → Text)
+
+**Was:**
+
+- **Kardinalität 0..1 pro R** (User-Entscheidung): Das Werkzeug routet
+  Klicks auf ein R mit bestehendem Event um (gleiche Hälfte → Label-
+  Editor), der Service verteidigt still (zweites CreateEvent = No-Op),
+  das Laden bleibt tolerant (permissives Modell wie bei Verbindungen).
+- **Seitentausch per Klickhälfte** („Umziehen"): Klick auf die andere
+  R-Hälfte → `SetEventSide` — die Spitze dockt gespiegelt ab (ObjectResized
+  mit vollem Vor-Zustand), die Label-Textbox folgt dem Spitzen-Delta. Reine
+  Positions-Geste, KEIN Editor (User-Entscheidung: „Bearbeiten" ist
+  Inhalts-Geste, „Umziehen" ist Positions-Geste).
+- **Label als eigene Textbox** (Kette R → E → Text, User-Idee): Das
+  `label`-Feld verschwand aus dem Event-Record; das Label ist ein normales
+  `Text`-Objekt mit ownerId = Event-ID — mehrzeilig (CTRL+ENTER), frei
+  bewegbar, selektier-/löschbar, genau wie Außentexte am R.
+  `CreateEvent(owner, side, content, w, h)` erzeugt Event UND Label in
+  EINEM Request (zwei ObjectAdded im selben Gesten-Eintrag = ein Undo-
+  Punkt); `EditEventLabel` löst zum owned Text auf (fehlend → Neuanlage
+  am abgeleiteten Anker, der NEW_OWNED_TEXT-Weg).
+- Transitive Move-Expansion (R → E → Label, zweite Stufe in findMoveSet),
+  Lösch-Kaskade als FIXPOINT-Schleife (HashMap-Iteration ist beliebig
+  geordnet — ein einziger Phase-1b-Durchlauf hätte das Label je nach
+  Iterationsreihenfolge überleben lassen), Persistenz-Migration für
+  Dateien vom 17.11. (EVENT-label → owned Text am abgeleiteten Anker).
+
+**Warum so:**
+
+- **Der Doppel-Move-Fall (Session-Fund):** Ursprünglich bewegte der
+  SERVICE die Label-Textbox automatisch im SetEventSide-Handler mit. Beim
+  Undo träte das Delta DOPPELT an — einmal das mechanische MoveObjectTo-
+  Inverse des Label-Moves, einmal die Service-Mitnahme im SetEventSide-
+  Inverse. Auflösung nach der Architektur-Regel „Kaskade und Undo dürfen
+  nie auseinanderdriften": Der Service bleibt single-effect (nur Seite +
+  Re-Dock), die GESTE komponiert den Label-Move als eigenen MoveObjects-
+  Request (Delta aus EventGeometry-Lesewissen) — beide Fakten im selben
+  Gesten-Eintrag, das Undo bleibt rein mechanisch. Als Gotcha in den
+  Skill `derived-positions-converging-undo` destilliert.
+- Label als owned Text statt Record-Feld: Der User wollte „so wie bei
+  einem R, wenn wir einen Außentext anhängen" — die komplette Text-
+  Maschinerie (Editor, Move, Resize, Kaskade, Persistenz) existiert
+  bereits; nur die Kette wird eine Ebene tiefer gehängt. Neu waren allein
+  die transitive Expansion (Events sind nie Move-Basis, ihre Labels
+  hängen an Expansionsgliedern) und der Kaskaden-Fixpoint.
+- Standard-Label-Box (140×60 wie alle neuen Texte) überlappt den Pfeil:
+  Klicks dort treffen das z-obere Label. Bewusst akzeptiert — beide
+  Ziele enden im Event-Werkzeug im selben Editor; im Auswahl-Werkzeug
+  selektiert der Klick den bewegbaren Text (dokumentiert im Test).
+
+**Grenzen & Verbesserungskandidaten:**
+
+- Flip ohne Editor: Klick auf die andere Hälfte öffnet KEINEN Editor
+  (reine Positions-Geste) — falls im Alltag überraschend, nachrüstbar.
+- Migrations-Anker: Bei fehlendem Owner-DTO sitzt das migrierte Label
+  versatzweise über der gespeicherten Spitze (Notfall-Pfad).
+- `mvn test` zum Session-Ende: 253/253 grün (Netto +4: Kardinalitäts-,
+  Flip-Doppel-Move-, Migrationstest; Renderer-Label-Test entfiel mit dem
+  Label-Kind).
+
+## 17.11.2026 (25. Arbeitsblock) — Event-Objekt: gebogener Pfeil am R (Modell, Werkzeug, View, Persistenz)
+
+**Was:**
+
+- Neues DiagramObject `Event` (FMC: Ereignis, das am R verarbeitet wird):
+  gebogener Pfeil, der mit der Spitze auf der OBEREN R-Kante andockt (¼ der
+  R-Breite vom Seitenrand), mit Label am Pfadanfang. Vollständiger vertikaler
+  Schnitt: Record + `EventSide`/`EventHandle` + reine Geometrie-Klasse
+  `EventGeometry` (eine Rechen-Wahrheit für Hit-Test, Editor-Anker, Rendering),
+  Service-Schreibpfad (`CreateEvent`/`SetEventLabel`/`ResizeEvent`), Kaskade,
+  Move-Mitnahme, Undo/Redo, `EventToolState` + `EventPathDragState`
+  (Shortcut E), `EventRenderer` + extrahierte `ArrowShape`, Inline-Editor-
+  Zweige, Persistenz-Typ EVENT, Toolbar-Button. 40 neue Tests, 249 gesamt.
+- Form-Griffe nach User-Idee „zwei Ws", aber als RELATIVE Längen umgesetzt:
+  `horizontalExtent` (Ausleger über den Seitenrand) + `verticalRise` (Höhe
+  über der Oberkante) im Record; die Griffpunkte Start/Knick sind abgeleitete
+  Punkte aus EventGeometry (NICHT echte Waypoint-Objekte). Start-Griff zieht
+  nur horizontal, Knick-Griff nur vertikal — achs-gebundener Drag-State mit
+  Preview-Hinweisen, ein Commit beim Loslassen, Klemm-Untergrenze 20 =
+  Bogen-Radius. Standardmaß 40/40, Seite aus der Klickhälfte (links/rechts),
+  Standard rechts.
+- 90°-Bogen am Knick als ¼-Kreis (Tangentenabstand d = min(20, horizontale
+  Länge, vertikale Länge)); die Polyline inkl. Bogenpunkte liefert EventGeometry
+  an Service (Hit) UND View (Rendering) — „wo klickbar" == „wo sichtbar".
+
+**Warum so:**
+
+- Echte Waypoints wären absolute Punkte: Sie blieben beim Move/Resize des R
+  zurück (trotzdem Re-Dock-Logik nötig) und zögen die gesamte W-Maschinerie
+  (Selektionsfilter, RouteEditMode, Kaskaden, Gleiten) an ein Symbol, das
+  keins davon braucht. Relative Längen bekommen Move-mit und Resize-Re-Dock
+  gratis aus der bestehenden Owned-Objekt-Maschinerie; die Achs-Bindung lebt
+  in einem eigenen kleinen Drag-State statt als Sonderfall im generischen
+  Move-Pfad.
+- Spitzen-Position (x/y) Service-geführt wie bei verankerten Texten: bei
+  Erzeugung und jedem Event-Write abgeleitet, R-Resize publiziert das
+  Re-Dock als sichtbaren ObjectsMoved-Eintrag (Präzedenzfall W-Gleiten),
+  der mechanische Restore überspringt still. Undo bleibt dadurch reine
+  Fakten-Ableitung ohne eigenes Kaskade-Wissen.
+- Events sind keine Verbindungsendpunkte: zentrale ConnectionRule (nie in
+  States) + stiller Filter im ConnectingState — der Klick aufs Event läuft
+  wie ein Leerraum-Klick auf einen Kettenpunkt hinaus.
+- Im Auswahl-Werkzeug ist Press-auf-Event reine Selektion (wie Verbindun-
+  gen): Drag wäre gelogen, die Spitze snappt nicht sinnvoll, und das R
+  zieht die Gruppe über die Move-Expansion. Doppelklick auf Event =
+  Label bearbeiten (EditEventLabel), niemals Resize-Modus.
+
+**Grenzen & Verbesserungskandidaten:**
+
+- Formgriffe nur im Event-Werkzeug greifbar; der diskutierte Ctrl+Klick-
+  Zugang aus dem Auswahl-Werkzeug (RouteEditMode-Analogon) ist bewusst
+  NICHT gebaut — erst Alltagstest (User-Entscheidung).
+- Label-Hit-Box geschätzt (7 Welt-Einheiten/Zeichen) statt über die echte
+  View-Messung — für Klickzwecke ausreichend, bei extremen Zoomstufen
+  grob. Kein Text-Umbruch im Label (einzeilig, ENTER committet).
+- Event-Symbole sind nicht verschiebbar und nicht connectbar (beides
+  bewusst); Sichtbarkeits-Steuerung über das kommende Layer-System
+  läuft über die layerId des Owners mit.
+- `mvn test` zum Session-Ende: 249/249 grün (40 neu: EventGeometryTest 7,
+  EventModelTest 16, EventToolTest 10, EventRendererTest 5, PersistenceTest +2).
+
 ## 17.11.2026 (24. Arbeitsblock) — Bugfix: Griff-Hit-Test liest das Ziel frisch (Undo von Move/Resize im Resize-Modus)
 
 **Was:**

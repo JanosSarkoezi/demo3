@@ -75,6 +75,7 @@ public final class ResizeModeState extends BaseState {
                 case RECTANGLE -> new RectangleToolState();
                 case CONNECT -> new ConnectToolState();
                 case TEXT -> new TextToolState();
+                case EVENT -> new EventToolState();
                 case SELECT -> new IdleToolState();
             };
         });

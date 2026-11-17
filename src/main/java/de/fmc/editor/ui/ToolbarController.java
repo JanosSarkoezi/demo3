@@ -40,6 +40,7 @@ public final class ToolbarController {
     private final ToggleButton rectangleButton;
     private final ToggleButton connectButton;
     private final ToggleButton textButton;
+    private final ToggleButton eventButton;
     /** Zuletzt gültiger Raster-Abstand — Rückstellziel bei ungültiger Eingabe. */
     private double lastValidGridSize;
     /** Gibt den Tastatur-Fokus an die Zeichenfläche zurück (Hook von Main —
@@ -69,8 +70,10 @@ public final class ToolbarController {
                 demo2ConnectIcon());
         textButton = createToolButton("Text", "Text einfügen (T)", ToolType.TEXT,
                 demo2TextIcon());
+        eventButton = createToolButton("Event", "Event an Rechteck (E)", ToolType.EVENT,
+                eventIcon());
 
-        // Der Kern wechselt das Werkzeug auch per Shortcuts K/R/C/T — die UI
+        // Der Kern wechselt das Werkzeug auch per Shortcuts K/R/C/T/E — die UI
         // muss folgen. Programmatisches setSelected(true) feuert KEIN
         // onAction (nur Nutzerinteraktion tut das), daher ist kein
         // Loop-Schutz nötig.
@@ -80,6 +83,7 @@ public final class ToolbarController {
                 case RECTANGLE -> rectangleButton;
                 case CONNECT -> connectButton;
                 case TEXT -> textButton;
+                case EVENT -> eventButton;
                 // Kein Select-Toggle existiert: alle abwählen.
                 case SELECT -> null;
             };
@@ -113,7 +117,8 @@ public final class ToolbarController {
         // --- Shapes ---
         bar.getChildren().add(sectionSeparator());
         bar.getChildren().add(sectionLabel("Shapes"));
-        bar.getChildren().addAll(circleButton, rectangleButton, connectButton, textButton);
+        bar.getChildren().addAll(circleButton, rectangleButton, connectButton, textButton,
+                eventButton);
 
         // --- Bearbeiten (demo2 hatte hier noch keine Undo-Buttons; Stil der
         //     Vollbreiten-Buttons entspricht demo2s „Diagramm"-Sektion) ---
@@ -241,6 +246,7 @@ public final class ToolbarController {
         if (rectangleButton != null) rectangleButton.setSelected(active == rectangleButton);
         if (connectButton != null) connectButton.setSelected(active == connectButton);
         if (textButton != null) textButton.setSelected(active == textButton);
+        if (eventButton != null) eventButton.setSelected(active == eventButton);
     }
 
     private void deselectAll() {
@@ -273,5 +279,25 @@ public final class ToolbarController {
         final Label icon = new Label("A");
         icon.setStyle("-fx-font-weight: bold; -fx-font-size: 14px;");
         return icon;
+    }
+
+    /** Event-Icon: Miniatur des gebogenen Pfeils — horizontaler Ausleger,
+     *  90°-Bogen, senkrechter Schaft mit abgesetzter Pfeilspitze. */
+    private javafx.scene.Group eventIcon() {
+        final javafx.scene.shape.Path path = new javafx.scene.shape.Path();
+        path.setStroke(Color.web("#3498db"));
+        path.setStrokeWidth(2);
+        path.setFill(javafx.scene.paint.Color.TRANSPARENT);
+        path.getElements().addAll(
+                new javafx.scene.shape.MoveTo(14, 4),
+                new javafx.scene.shape.LineTo(8, 4),
+                new javafx.scene.shape.QuadCurveTo(4, 4, 4, 8), // 90°-Bogen angedeutet
+                new javafx.scene.shape.LineTo(4, 10));
+        final javafx.scene.shape.Polygon arrow = new javafx.scene.shape.Polygon(
+                4.0, 14.0,
+                1.5, 9.0,
+                6.5, 9.0);
+        arrow.setFill(Color.web("#3498db"));
+        return new javafx.scene.Group(path, arrow);
     }
 }

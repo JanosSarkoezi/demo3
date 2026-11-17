@@ -5,6 +5,7 @@ import de.fmc.editor.core.event.CustomKeyCode;
 import de.fmc.editor.core.event.CustomMouseButton;
 import de.fmc.editor.core.event.InputEvent;
 import de.fmc.editor.core.model.DiagramObject;
+import de.fmc.editor.core.model.Event;
 import de.fmc.editor.core.model.Waypoint;
 import de.fmc.editor.core.state.rule.BaseState;
 
@@ -38,8 +39,12 @@ public final class ConnectingState extends BaseState {
                     // Waypoints sind keine Verbindungsziele (Routenpunkte,
                     // keine Objekte): Ein Klick auf ein vorhandenes W setzt
                     // einen NEUEN Waypoint in die entstehende Kette — genau
-                    // wie ein Klick ins Leere.
-                    if (hitObject.isPresent() && hitObject.get() instanceof Waypoint) {
+                    // wie ein Klick ins Leere. Dasselbe gilt für Events
+                    // (Symbole am R, keine Akteure): Der Klick läuft wie ein
+                    // Leerraum-Klick auf einen Kettenpunkt hinaus.
+                    if (hitObject.isPresent()
+                            && (hitObject.get() instanceof Waypoint
+                                || hitObject.get() instanceof Event)) {
                         hitObject = Optional.empty();
                     }
 
@@ -91,6 +96,7 @@ public final class ConnectingState extends BaseState {
                 case CIRCLE -> new CircleToolState();
                 case RECTANGLE -> new RectangleToolState();
                 case TEXT -> new TextToolState();
+                case EVENT -> new EventToolState();
                 case SELECT -> new IdleToolState();
                 case CONNECT -> this;
             };

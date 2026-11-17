@@ -27,6 +27,10 @@ public final class HandlePositions {
             case Text text -> ofBox(text.x(), text.y(), text.width(), text.height());
             case Circle circle -> ofCircle(circle);
             case Waypoint waypoint -> Map.of();
+            // Events haben keine Resize-Griffe: Ihre zwei Formgriffe (Start
+            // horizontal, Knick vertikal) sind abgeleitete Punkte aus
+            // EventGeometry und leben im Event-Werkzeug, nicht im Resize-Modus.
+            case Event event -> Map.of();
         };
     }
 

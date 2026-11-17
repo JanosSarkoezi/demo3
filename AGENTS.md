@@ -9,10 +9,14 @@ strikte Trennung zwischen Interaktionslogik (Core) und späterer UI (JavaFX).
 > externes K/R-Label, K-Buchstabe, R-Inhalt, Verbindungs-Label — Stufe
 > A/B/C, siehe Abschnitt 9), seit 03.11. mit Speichern/Laden (JSON im
 > demo2-Format, siehe Abschnitt 3 „Persistenz"), seit 10.11. mit modus-
-> und hover-gerechtem Mauszeiger (siehe Abschnitt 9 „Cursor-Präsentation").
-> Offen: „Zentriert"-Schalter-UI (User hat eigene Ideen), Layer-System —
-> Details unter „Geplant / fehlt noch"; dort stehende Klassennamen sind
-> **Ziel-Vision, nicht Realität**.
+> und hover-gerechtem Mauszeiger (siehe Abschnitt 9 „Cursor-Präsentation"),
+> seit 17.11. mit Event-Symbolen (gebogener Pfeil am R mit ziehbarer Form,
+> siehe Abschnitt 3 „Event-Schreibpfad"), seit 26.11. mit zwei Event-
+> RICHTUNGEN (INCOMING dockt oben an, OUTGOING startet unten — Vier-
+> Quadranten-Klick im Event-Werkzeug wählt Richtung UND Seite, 0..1 je
+> Richtung). Offen: „Zentriert"-Schalter-UI
+> (User hat eigene Ideen), Layer-System — Details unter „Geplant / fehlt
+> noch"; dort stehende Klassennamen sind **Ziel-Vision, nicht Realität**.
 
 ---
 
@@ -69,8 +73,8 @@ Modus — zugleich Abhakliste für den visuellen Smoke-Test). Kernanforderungen:
 
 ### 1. Datenmodell (Core, immutable)
 * **Sealed Interface `DiagramObject`** mit den Records `Circle`, `Rectangle`,
-  `Waypoint` und `Text`. Alle sind immutable, threadsicher und frei von JavaFX-Imports.
-  `ToolType` (SELECT, CIRCLE, RECTANGLE, CONNECT, TEXT) steuert die Werkzeuge.
+  `Waypoint`, `Text` und `Event`. Alle sind immutable, threadsicher und frei von JavaFX-Imports.
+  `ToolType` (SELECT, CIRCLE, RECTANGLE, CONNECT, TEXT, EVENT) steuert die Werkzeuge.
   * **`Circle`** trägt `label` (innerer Text, per Konvention 1 Buchstabe —
     Modell permissiv, UI erzwingt), **`Rectangle`** trägt `content` +
     `centered` (Default true; die innere Text-Box ist von der R-Geometrie
@@ -85,6 +89,33 @@ Modus — zugleich Abhakliste für den visuellen Smoke-Test). Kernanforderungen:
     Verbindungsabschnitt verankert (Position vom Service abgeleitet bei
     Erzeugung/Re-Ankerung). **`TextAnchor`** (segmentIndex, t, offsetX/Y):
     Index klemmt bei W-Löschung, t und Offset bleiben als Absicht erhalten.
+  * **`Event`** (Record, 17.11., Kardinalität/Label-Kette 23.11., Richtungen
+    26.11.): Ereignis-Symbol am R — gebogener Pfeil, dessen LABEL ein
+    eigenes `Text`-Objekt mit ownerId = Event-ID ist (Kette R → E → Text,
+    analog zu den Außentexten am R: mehrzeilig, frei bewegbar, selektier-/
+    löschbar). `ownerId` referenziert das besitzende Rectangle mit
+    Kardinalität 0..1 **JE RICHTUNG** (Werkzeug erzwingt, Service
+    verteidigt still, Laden bleibt tolerant): `direction` INCOMING =
+    hereinkommend (Spitze dockt an der OBEREN Kante an, Pfeil zeigt in R),
+    OUTGOING = rausgehend (Fuß startet an der UNTEREN Kante, Pfeilspitze
+    sitzt waagrecht nach außen am Arm-Ende) — beide dürfen am selben R
+    koexistieren (FMC-Lesart: rein oben, raus unten). Die FORM lebt als
+    RELATIVE Längen im Record: `horizontalExtent` = Ausleger über den
+    Seitenrand, `verticalRise` = Länge des senkrechten Stücks von der
+    Andockkante weg (Standard 40/40, Klemm-Untergrenze 20 = Bogen-
+    Radius). x/y ist der ANDOCKPUNKT auf der R-Kante (¼ der Breite vom
+    Seitenrand; `EventSide` LEFT/RIGHT, Standard rechts; oben bei
+    INCOMING, unten bei OUTGOING) — vom Service abgeleitet und gepflegt
+    wie bei verankerten Texten. Die zwei Formgriffe (Start nur
+    horizontal, Knick nur vertikal ziehbar) sind abgeleitete Punkte aus
+    **`EventGeometry`** (pure Klasse: Andockpunkt/Knick/Ende/Polyline
+    inkl. 90°-Bogen, Hit-Test, Bounds, Label-Anker — je Richtung
+    parametrisiert; die OUTGOING-Polyline ist die gespiegelte + UMGE-
+    KEHRTE Incoming-Punktefolge, deshalb orientiert der Renderer die
+    Pfeilspitze am letzten Segment richtungslos) — bewusst KEINE
+    Waypoint-Objekte: absolute Punkte blieben beim Move/Resize des R
+    zurück und zögen die ganze W-Maschinerie an ein Symbol, das sie nicht
+    braucht.
 * **Datenhaltung im `DiagramService`** (`core.service`): implementiert das
   **read-only Interface `DiagramQuery`** (`findTopmostAt`, `findById`) —
   Details siehe Abschnitt 3.
@@ -103,8 +134,10 @@ Die gesamte Kommunikation läuft über das sealed Interface `DomainEvent` mit
 drei Zweigen:
 
 * **`InputEvent`** (rohe Eingaben): `MousePressed` (mit clickCount, 2 =
-  Doppelklick, und `controlDown` für den Selektions-Toggle / späteres
-  Gummiband; public Kompatibilitäts-Konstruktor ohne Modifier-Info),
+  Doppelklick, `controlDown` für den Selektions-Toggle / späteres
+  Gummiband und `shiftDown` — wird seit dem Vier-Quadranten-Modell,
+  26.11., NICHT mehr ausgewertet, das Feld bleibt am Record; public
+  Kompatibilitäts-Konstruktoren ohne Modifier-Info),
   `MouseDragged`, `MouseReleased`, `MouseScrolled`, `KeyPressed`,
   `KeyReleased`. Verwendet die eigenen Enums `CustomMouseButton` /
   `CustomKeyCode` — **keine** JavaFX-Typen in Events.
@@ -127,15 +160,29 @@ drei Zweigen:
   `SetCircleLabel`, `SetRectangleContent` (inkl. centered-Schalter),
   `UpdateText` (nur Inhalt/Box), `SetAnchor` (nullable TextAnchor — null =
   Anker lösen, Position bleibt), `AddAnchoredText` (Service leitet x/y aus
-  dem Anker ab), `RequestUndo` /
+  dem Anker ab), Event-Requests: `CreateEvent` (Owner muss ein R sein,
+  Kardinalität 0..1 JE RICHTUNG (26.11.) — Validierung zentral im
+  Service; erzeugt Event UND Label-Textbox in EINEM Request, Andockpunkt +
+  Label-Anker aus Owner + Seite + Richtung abgeleitet; Create-Präzedenzfall
+  wie `CreateConnection`),
+  `SetEventSide` (Seitentausch: reine Positions-Geste, Spitze dockt neu
+  ab — die Label-Textbox bewegt die GESTE mit, nie der Service, siehe
+  Gotcha unten), `ResizeEvent` (nur die zwei Form-Längen; Klemm-Untergrenze
+  im Service),
+  `RequestUndo` /
   `RequestRedo` (UI übersetzt CTRL+Z / SHIFT+CTRL+Z hierher),
   `LoadDiagram` (Persistenz-Restore: kompletter Bestand in z-Ordnung +
   Connections mit Original-IDs — ohne Validierung, siehe Abschnitt 3).
 * **UI-Intents auf dem Bus:** `EditTextOfObject` (innerer Text K/R), `EditText`
   (bestehendes Text-Objekt), `CreateTextFor` (ownerId null = freier Text),
-  `CreateConnectionText` (mit projiziertem Anker). Das Text-Werkzeug
-  emittiert sie; seit 02.11. (Stufe A/B/C) konsumiert der
-  `InlineTextEditorController` ALLE vier. ESC im Editor verbraucht
+  `CreateConnectionText` (mit projiziertem Anker), `CreateEventFor`
+  (ownerId + Seite + Label-Anker aus EventGeometry — Editor öffnet dort,
+  Commit erzeugt Event UND Label über `CreateEvent`; leerer Commit
+  verwirft still) und `EditEventLabel` (Label-Textbox des Events
+  bearbeiten — der Editor löst zum owned Text auf bzw. legt ihn neu an).
+  Die Text-Werkzeug-Intents
+  emittiert das Text-Werkzeug, die Event-Intents das Event-Werkzeug; der
+  `InlineTextEditorController` konsumiert sie alle. ESC im Editor verbraucht
   die UI selbst — erreicht den Core nie (seit der Ziel-Greife am
   Systemrand garantiert).
 * **`DiagramEvent`** (Fakten von Diagram- & SelectionService): Antwort auf
@@ -174,8 +221,9 @@ LIFO-Disziplin des Undo macht alte Indizes selbstheilend.
 **Der Event-Bus ist der einzige Schreibpfad:**
 keine öffentlichen Mutatoren. Er konsumiert `ActionEvent`s und veröffentlicht
 bestätigte Änderungen als `DiagramEvent`s. Verbindungen validiert er zentral
-über steckbare `ConnectionRule`s (Standardregel: gleicher Typ nicht verbindbar
-→ `ConnectionRejected`). Zweiphasige Initialisierung gegen die Zirkularität
+über steckbare `ConnectionRule`s (Standardregeln: gleicher Typ nicht
+verbindbar; Events sind keine Verbindungsendpunkte → jeweils
+`ConnectionRejected`). Zweiphasige Initialisierung gegen die Zirkularität
 Bus ↔ Service: `new DiagramService()` → `new InteractionEventBus(service, …)`
 → `service.attachTo(bus)`.
 * **Text-Schreibpfad:** `SetCircleLabel`/`SetRectangleContent`/`UpdateText`/
@@ -183,6 +231,41 @@ Bus ↔ Service: `new DiagramService()` → `new InteractionEventBus(service, �
   `ObjectAdded`). Die Anker-Position leitet der Service zentral ab
   (`polyPoints` + Projektion — Geometrie-Wissen liegt nie in den States);
   `SetAnchor(null)` löst den Anker und hält die Position.
+* **Event-Schreibpfad (17.11., Kardinalität/Label-Kette 23.11., Richtungen
+  26.11.):** `CreateEvent` → ZWEI `ObjectAdded`-Fakten (Event, dann
+  Label-Textbox) im selben Gesten-Eintrag = ein Undo-Punkt; Validierung
+  zentral: Owner muss ein R sein und die Kardinalität 0..1 JE RICHTUNG
+  erfüllen (alles andere bleibt stiller No-Op; hereinkommend und
+  rausgehend koexistieren am selben R). `SetEventSide` → `ObjectResized`
+  mit vollem Vor-Zustand (Andockpunkt dockt an der neuen Seite ab);
+  `ResizeEvent` → `ObjectResized` (Klemm-Untergrenze 20). Die Andock-
+  Position (x/y) ist eine reine Funktion von (Owner-Geometrie, Seite,
+  Richtung) und wird auf JEDEM Event-Write idempotent neu abgeleitet
+  (`EventGeometry` — Geometrie-Wissen nie im Aufrufer). R-**Resize**
+  dockt die Andockpunkte aller Owned-Events sichtbar
+  neu ab (eigener `ObjectsMoved`-Batch im selben Gesten-Eintrag —
+  Präzedenzfall W-Gleiten); R-**Move** nimmt Events UND ihre Labels per
+  TRANSITIVER Move-Expansion mit (Delta auf den Andockpunkt, Längen
+  relativ → gezogene Form bleibt exakt). Der mechanische Restore-Pfad
+  (MoveObjectTo, Undo-Inverse) überspringt die Ableitung still — dieselbe
+  Asymmetrie wie bei verankerten Texten. Laden dockt die Andockpunkte
+  frisch ab (selbstheilend gegen randeditierte Dateien, still —
+  `DiagramReset` trägt den Nach-Zustand).
+* **Event-Umziehen — die GESTE komponiert, der Service bleibt
+  single-effect (23.11., Session-Fund):** Der Seitentausch bewegt die
+  Label-Textbox bewusst NICHT im `SetEventSide`-Handler, sondern das
+  Event-Werkzeug publiziert beide Requests (`SetEventSide` +
+  `MoveObjectTo` je Label mit an der vertikalen R-Symmetrieachse
+  gespiegelter Position: `newX = 2·R.x − label.x`, y unverändert — der
+  Pfeil selbst ist exakt diese Spiegelung, also behält das Label seine
+  relative Lage; eine Delta-Wanderung ließe ein weit gezogenes Label auf
+  der alten Seite zurück). Grund für die Geste-Komposition: Eine
+  Service-seitige Mitnahme würde im Undo DOPPELT angewandt — einmal über
+  das mechanische MoveObjectTo-Inverse des Label-Moves, einmal über die
+  Mitnahme im SetEventSide-Inverse. Beide Fakten im selben Gesten-Eintrag
+  halten das Undo rein mechanisch („Kaskade und Undo dürfen nie
+  auseinanderdriften" — derselbe Grundsatz wie bei der Lösch-Kaskade).
+  Als Gotcha im Skill `derived-positions-converging-undo` festgehalten.
 * **Verankerte Texte — Drag = Re-Ankerung, Restore = Skip:** Der
   Gesten-Pfad (`MoveObject`/`MoveObjects`) re-ankert Texte mit Anker:
   Die Zielposition wird auf die Kette projiziert und schreibt die
@@ -199,10 +282,14 @@ Bus ↔ Service: `new DiagramService()` → `new InteractionEventBus(service, �
   wandern Anker-Indizes hinter der Einfügestelle mit (+1,
   `ObjectTextChanged`); beim W-Löschen klemmt der Index bei der Ableitung
   — t und Offset bleiben als Absicht erhalten.
-* **Lösch-Kaskade Phase 1b:** Texte, deren Owner (Objekt ODER Connection)
-  doomed ist, kaskadierten mit — als sichtbare Fakten in `ObjectsRemoved`,
-  nie versteckt (demo2-Lektion). Das gilt für K/R-Owner wie für
-  Connection-Owner.
+* **Lösch-Kaskade Phase 1b (Fixpoint, 23.11.):** Texte, deren Owner
+  (Objekt, Connection ODER Event — Kette R → E → Text) doomed ist, und
+  Events, deren R doomed ist, kaskadierten mit — als sichtbare Fakten in
+  `ObjectsRemoved`, nie versteckt (demo2-Lektion). Die Sammel-Schleife
+  läuft bis zur Stabilität: Die HashMap-Iteration ist beliebig geordnet,
+  ein einziger Durchlauf hätte das Event-Label je nach Iterations-
+  reihenfolge überleben lassen (sein Owner-Event wäre evtl. erst NACH dem
+  Text gesammelt worden).
 * **Direkte Verbindungs-Löschung (03.11.):** `DeleteObjects` nimmt seit der
   Verbindungs-Selektion auch Connection-IDs auf — der Handler löst sie über
   `collectConnectionCascade` auf (Ws + verankerte Labels kaskadieren, die
@@ -235,19 +322,34 @@ Bus ↔ Service: `new DiagramService()` → `new InteractionEventBus(service, �
   z-Ordnung (deterministisch; demo2 exportierte Map-Reihenfolge: nicht
   kopieren). **Format-Grenze (bewusst, demo2-Semantik):** Texte leben im
   eigenen texts-Abschnitt ohne z-Position und laden deshalb OBEN auf die
-  z-Ordnung. Layers-Abschnitt: die zwei Default-Ebenen („Standard"/
+  z-Ordnung. Events (17.11.) reisen als PersistedObject mit Typ EVENT
+  (demo2 kannte ihn nicht — kein Kompatibilitätsrisiko): gespeichert werden
+  ownerId, side, direction (26.11.) und die zwei Form-Längen; fehlende
+  Felder fallen im Codec auf die Defaults (RIGHT, INCOMING, 40/40),
+  fehlender Owner macht den Eintrag defekt (still übersprungen); die
+  mitgeschriebene Andock-Position ist
+  abgeleitet und wird beim Laden frisch abgedockt. Das Event-LABEL reist
+  seit 23.11. als normaler texts-Eintrag mit parentObjectId = Event-ID;
+  das label-Feld des EVENT-Typs bleibt MIGRATIONS-Eingabe für Dateien vom
+  17.11. (nicht-leeres label → owned Text am abgeleiteten Anker, still —
+  Migration ist immer INCOMING, Dateien vor dem 26.11. kannten nur die).
+  Layers-Abschnitt: die zwei Default-Ebenen („Standard"/
   „Wegpunkte", IDs aus spec.md) werden als Fixliste mitgeschrieben,
   tolerant gelesen — bis das Layer-System existiert. `PersistedLayers.
   STANDARD_LAYER_ID` ist zugleich Produkt-Default (Main).
 * **Move-Mengen-Query** `findMoveSet(basisIds)` (Default auf `DiagramQuery`,
   überschrieben im Service): die effektive Move-Menge ist eine reine Funktion
-  der Auswahl-Basis — Basis selbst + externe Label + Waypoints
+  der Auswahl-Basis — Basis selbst + externe Label + Owned-Events +
+  (transitiv, 23.11.) deren owned Label-Textboxen + Waypoints
   VOLLSELEKTierter Verbindungen (beide Endpunkte in der Basis). Der State
   (IdleToolState) ruft nur diese eine Query; Move-Expander-Wissen liegt nie
   inline in States. Connection-IDs in der Basis werden gefiltert (03.11.):
   Verbindungen sind nicht bewegbar — vor allem dürfen ihre owned-Texte
-  nicht als Move-BASIS hinegelangen (ein Delta-Move würde das Label
-  RE-ANKERN statt gleiten lassen).
+  nicht als Move-BASIS hineingelangen (ein Delta-Move würde das Label
+  RE-ANKERN statt gleiten lassen). Event-IDs werden ebenso gefiltert
+  (17.11.): Events sind nicht selbst bewegbar (Geometrie vom R abgeleitet,
+  Drag am Event = bewusster No-Op wie an Verbindungen); als Anhängsel
+  ihres R wandern sie über die Objekt-Expansion mit.
 
 ### 4. Auswahl, Grid & Handles (read-only im Interaktions-Kontext)
 * **`SelectionService`** (`core.service`): hält die geordnete, duplikatfreie
@@ -355,7 +457,11 @@ ein `BaseStateTest` beweist die Invariante direkt. Konsequenzen:
   Ctrl+Klick = Toggle, Leere/ESC = leeren —, DEL = Auswahl löschen
   (seit 03.11. auch Connection-IDs: Misch-Auswahl in EINER Geste),
   Doppelklick → `ResizeModeState` (K/R/Text — alles mit Griffen; Ws sind
-  Routenpunkte ohne Griffe — Doppelklick selektiert sie nur); Plain-Klick
+  Routenpunkte ohne Griffe — Doppelklick selektiert sie nur; Events
+  gleichfalls ohne Resize-Modus — Doppelklick auf ein Event →
+  `EditEventLabel`); Plain-Klick auf ein Event = reine Selektion ohne
+  Move-Vorbereitung (nicht bewegbar wie Verbindungen; Ctrl-Toggle bleibt,
+  das R zieht über die Move-Expansion mit). Plain-Klick
   NAHE einer Verbindung
   (Toleranz `CONNECTION_CLICK_TOLERANCE_PIXELS` = 8 Bildschirm-px / Zoom)
   selektiert NUR die Verbindung (`SetSelection({connectionId})` — blauer
@@ -376,6 +482,31 @@ ein `BaseStateTest` beweist die Invariante direkt. Konsequenzen:
   Klick auf Text → `EditText`; Verbindungsnähe → bestehendes Label
   bearbeiten [Kardinalität 0..1] sonst `CreateConnectionText` mit
   projiziertem Anker; Leere → `CreateTextFor(null)`; ESC → Idle),
+  `EventToolState` (17.11., Shortcut E; Kardinalität/Seitenlogik 23.11.,
+  Vier-Quadranten-Modell 26.11. —
+  EINE Press-Regel, Verzweigungen in der Aktion: Press auf einen Formgriff
+  → `EventPathDragState` (oberstes Event zuerst, Greif-Radius 6 px/Zoom
+  wie beim Resize-Griff); Klick auf ein Event ODER seine Label-Textbox →
+  `EditEventLabel`; Klick in ein R-QUADRANT — die VERTIKALE Klickhälfte
+  adressiert die RICHTUNG (oben = INCOMING, das dockt oben an; unten =
+  OUTGOING, das startet unten — die Mittellinie gehört zur unteren
+  Hälfte), die HORIZONTALE die Seite — dreigeteilt nach Kardinalität
+  0..1 JE RICHTUNG: ohne Event der adressierten Richtung →
+  `CreateEventFor` (Seite UND Richtung aus dem Quadrant, Label-Anker aus
+  `EventGeometry` — bei OUTGOING Mitte des äußeren Segments unterhalb),
+  Event der adressierten Richtung auf der GEKLICKTEN Seite →
+  `EditEventLabel` (Inhalts-Geste), auf der ANDEREN Seite →
+  UMZIEHEN (`SetEventSide` + `MoveObjectTo` je Label mit an der vertikalen
+  R-Symmetrieachse GESPIEGELTER Position — der Pfeil ist selbst exakt
+  diese Spiegelung, das Label behält seine relative Lage; reine Positions-
+  Geste, KEIN Editor; Geste komponiert, siehe Abschnitt 3); Shift wird
+  NICHT mehr ausgewertet (Modifier bewusst tot statt optional); Leere/K/
+  fremder Text/W → stiller No-Op; ESC → Idle),
+  `EventPathDragState` (achs-gebundener Form-Drag: Start-Griff schreibt NUR
+  horizontalExtent, Knick-Griff NUR verticalRise — die andere Maus-Achse
+  wird still verworfen; pro Drag-Segment ein `ResizePreviewChanged`-Hinweis
+  mit geklemmter Preview, beim Loslassen GENAU EIN `ResizeEvent`, bei ESC
+  Abbruch ohne Commit — Muster `HandleDragState`),
   `PendingCreateOrPanState` (Klick-oder-Drag-Entscheidung; Erzeugen NUR
   auf freier Fläche — Klick auf ein bestehendes Objekt ist ein stiller
   No-Op gegen deckungsgleiche Stapel, unsichtbare Ws blockieren nicht),
@@ -518,8 +649,45 @@ und Rückkehr zum Idle; unbezogene Entfernungen lassen den Modus
 bestehen) UND den Fresh-Read des Griff-Hit-Tests (Undo eines Moves oder
 Resizes im Modus: Griffe greifen an der wiederhergestellten Position,
 Modus überlebt),
+`EventGeometryTest` (17.11., Richtungen 26.11.) die reine Event-Geometrie
+(Andockpunkt bei ¼ — oben/je Richtung, Spiegelung links/rechts,
+OUTGOING als gespiegelte+umgedrehte Kette, 90°-Bogen mit Kreis-Treue
+und Klemmung, Hit auf Kette inkl. Bogen je Richtung, Label-Anker je
+Richtung, Ketten-Bounds), `EventModelTest` (17.11./23.11./26.11.) den
+Service-Flow (Create mit Event+Label und 0..1-Verteidigung JE RICHTUNG,
+Koexistenz von INCOMING und OUTGOING am selben R, Outgoing-Andock an
+der Unterkante mit Arm-Mitten-Label, SetEventSide
+mit gespiegelter Spitze und Undo, Flip-Undo OHNE Doppel-Move des Labels,
+ResizeEvent mit Klemmung, transitive Move-Expansion von R über E zum
+Label, Re-Dock bei R-Resize mit Undo, Lösch-Kaskade der ganzen Kette
+inkl. Restore, Hit-Test mit Label-Überlappungs-Präzedenz,
+Nicht-Connectbarkeit, Load mit frischem Re-Dock, Band-Treffer),
+`EventToolTest` (17.11./23.11./26.11.) die Gesten (Quadrant-Klick →
+Erstellung OHNE bestehendes Event der adressierten Richtung — auch OE
+ohne Modifier, Eigen-Quadrant → EditEventLabel, horizontal anderes
+Quadrant → SetEventSide + Label-Spiegelung, Press auf die Label-Textbox →
+EditEventLabel, untere Quadranten → OUTGOING-Intents inkl. Koexistenz
+neben bestehendem INCOMING, oberes Quadrant ignoriert ein bestehendes
+Outgoing, Shift-Regression (Modifier tot), achs-gebundene Form-Drags mit
+genau einem
+Commit, Klemmung als EIN Undo-Punkt, ESC-Abbruch ohne Commit,
+KEY_E/KEY_K, ESC)
+und `EventRendererTest` (17.11., Richtungen 26.11.) die Pfeil-Geometrie
+headless (Start→Bogen→Spitze mit Einkerbung, Spitze auf der Oberkante
+nach unten gedreht, gespiegelte linke Seite, gezogene Form; OUTGOING:
+Fuß→Bogen→Ende, Pfeil am äußeren Ende waagrecht nach außen — 0°/180°),
+`PersistenceTest` (23.11./26.11.) zusätzlich Event-Roundtrip mit Label im
+texts-Abschnitt, OUTGOING-Roundtrip mit direction-Feld + Legacy-Default
+INCOMING, die Migration alter EVENT-label-Felder zu owned Texten
+und die Toleranz ohne label-Feld,
+`EventOwnerRefreshTest` (23.11., Bugfix „Pfeil klebt nach Undo des
+R-Moves") den owner-derivierten View-Refresh headless: R-Move + Undo
+zeichnet den Pfeil wieder an der alten Position (Modell- und Replay-
+Fakt-Asserts inklusive), Negative Probe mit ausgeschaltetem Refresh-
+Schalter reproduziert exakt den User-Befund, Redo folgt vorwärts, und
+ein weit gezogenes Label bleibt von Owner-Refreshes unberührt,
 `BusTestSupport` ist der geteilte
-Test-Rahmen — **209 Tests gesamt, alle grün**.
+Test-Rahmen — **271 Tests gesamt, alle grün**.
 **Jedes neue Interaktions-Feature bekommt einen solchen Event-basierten Test.**
 
 ### 9. UI-Schicht („Erstes Licht" 30.10. → Inline-Editor 02.11. → Persistenz 03.11.)
@@ -544,7 +712,8 @@ Test-Rahmen — **209 Tests gesamt, alle grün**.
   `UiMouseState` hält die Mausposition (Sitzungszustand der UI).
   `ToolbarController`: reiner Publisher (`SelectTool`, `RequestUndo/Redo`,
   `SetGridSize`), Sync über `ToolChanged`; KEIN Select-Button (kein aktiver
-  Toggle = SELECT, demo2-Stil); Sektion „Datei" mit Speichern/Laden-Buttons
+  Toggle = SELECT, demo2-Stil); seit 17.11. ein Event-Button (Shortcut E,
+  Icon = Miniatur des gebogenen Pfeils); Sektion „Datei" mit Speichern/Laden-Buttons
   (Actions durchgereicht aus dem `PersistenceController` — die Toolbar hat
   keinen Datei-Zugriff); Sektion „Snap to Grid" mit freiem numerischem
   Eingabefeld (Validierung: Zahl > 0, Komma erlaubt; ungültige Eingabe stellt
@@ -581,6 +750,14 @@ Test-Rahmen — **209 Tests gesamt, alle grün**.
   von der R-Geometrie abgeleitet) und Verbindungs-Label (`CreateConnectionText`:
   Editor an der Klick-Stelle, Commit als `AddAnchoredText` — der Service
   leitet die Position aus dem projizierten Anker ab, genau wie beim Gleiten).
+  Seit 17.11. zusätzlich die Event-Label-Zweige (seit 23.11. mehrzeilig wie
+  alle Texte): `CreateEventFor` (Editor am mitgegebenen Label-Anker,
+  Commit als `CreateEvent` — erzeugt Event UND Label-Textbox im Service,
+  mit SEITE und RICHTUNG aus dem Intent; Modellkontakt erst hier, leerer
+  Commit verwirft still) und
+  `EditEventLabel` (löst zum owned Text des Events auf — vorhanden:
+  derselbe EDIT_TEXT-Weg wie bei jedem Text; fehlt er: Neuanlage am
+  abgeleiteten EventGeometry-Anker über den AddElement-Weg).
   Drei Disziplinen: (1) „Klick daneben
   committet" KONSUMIERT den Klick — der Press-Filter steht in der Kette VOR
   dem Übersetzer (Main konstruiert den Editor zuerst) und schluckt die
@@ -602,6 +779,25 @@ Test-Rahmen — **209 Tests gesamt, alle grün**.
   `RoutingStrategy` (Straight/RoundedCorner, Radius 20) und
   `ConnectionViewMapper` (Pfeilspitze arrowSize 12/indent 0.65,
   Boundary-Schnitt, in-place Path-Refresh) sind 1:1 aus demo2 portiert.
+  **Events (17.11.):** `EventRenderer` zeichnet das Event-Symbol (Kind 0 =
+  Path für Stroke/Glow, Kind 1 = Pfeilspitze — das Label ist seit 23.11.
+  ein eigenes Text-Objekt mit eigenem Node) komplett aus `EventGeometry` —
+  die View rechnet nie selbst; `ArrowShape` ist die
+  extrahierte Pfeilspitzen-Form (shared von Connection- und Event-Pfeil).
+  **Owner-derivierter Refresh (23.11., Bugfix „Pfeil klebt nach Undo des
+  R-Moves"):** Da die Pfeilgeometrie aus dem OWNER abgeleitet wird, frischt
+  die View die Event-Nodes bei JEDER Owner-Änderung sofort auf — im Move-
+  Pfad (`onObjectsMoved` → `refreshEventNodesAgainst`) wie im Resize-Pfad
+  (`onObjectResized`). Beim Undo läuft die inverse Wiedergabe RÜCKWÄRTS:
+  Der eigene Move-Entry des Events zeichnet noch gegen den ALTEN
+  Owner-Stand; erst der Owner-Restore konvergiert die View. Regressionstest
+  `EventOwnerRefreshTest` (headless) inkl. Negative Probe über den
+  package-private Schalter `REFRESH_OWNER_DERIVED_NODES`.
+  Die zwei Formgriff-Marker liegen im uiLayer und sind NUR im Event-Werkzeug
+  sichtbar (ToolChanged-getrieben, denselben Klebe-Refresh wie die
+  Resize-Griffe: Objekt-Fakten und Event-Drag-Preview speisen sie);
+  während des R-Resize klebt die Event-Spitze an der PREVIEW-Kante
+  (refreshEventNodesAgainst — Modell-Fakten erst beim Commit).
   Hover: eigener MOUSE_MOVED-Filter — Objekte über `findTopmostAt`,
   Verbindungsketten (wenn kein Objekt getroffen) über `findConnectionNear`
   mit grauem Glow auf dem Pfad (demo2-Stil, Toleranz in Bildschirm-px/Zoom).
@@ -652,9 +848,16 @@ Test-Rahmen — **209 Tests gesamt, alle grün**.
   Hover ist Lesewissen.**
 * **Bekannte Restchen:** View-z-Ordnung folgt der Fakt-Reihenfolge
   (Restauration landet visuell oben — TODO im `GraphView`); Preview ohne
-  Rundung auf dem freien Abschnitt; Shortcuts K/R/C/T wirken nicht in den
+  Rundung auf dem freien Abschnitt; Shortcuts K/R/C/T/E wirken nicht in den
   langen Modi (Connecting/ResizeMode/RouteEditMode) — nur Toolbar-Klick
-  und ESC beenden sie; das Layer-System (Sichtbarkeits-Steuerung als
+  und ESC beenden sie; Event-Formgriffe sind nur im Event-Werkzeug
+  greifbar (Ctrl+Klick-Zugang aus dem Auswahl-Werkzeug als möglicher
+  Nachzug, bewusst erst nach Alltagstest — User-Entscheidung 17.11.);
+  die Standard-Label-Box (140×60 wie bei allen neuen Texten) überlappt
+  den Pfeil — Klicks dort treffen das z-obere Label (beide Ziele enden
+  im Event-Werkzeug im selben Editor; im Auswahl-Werkzeug selektiert der
+  Klick den bewegbaren Text — dokumentiert im EventModelTest);
+  das Layer-System (Sichtbarkeits-Steuerung als
   Ebenen) fehlt noch.
 
 ---

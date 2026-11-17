@@ -74,13 +74,17 @@ public final class RouteEditModeState extends BaseState {
                         return this;
                     }
                     // K/R/Text: Modus verlassen (Ws verschwinden), dann exakt
-                    // die Idle-Doppelklick-Semantik.
+                    // die Idle-Doppelklick-Semantik. Events: Modus verlassen
+                    // und Label bearbeiten (wie im Idle-Doppelklick).
                     c.publisher().publish(new ActionEvent.WaypointFocusChanged(null));
                     c.publisher().publish(
                             new ActionEvent.SetSelection(List.of(target.get().id())));
                     if (target.get() instanceof Circle || target.get() instanceof Rectangle) {
                         c.publisher().publish(new ActionEvent.ResizeModeChanged(target.get()));
                         return new ResizeModeState(target.get());
+                    }
+                    if (target.get() instanceof de.fmc.editor.core.model.Event event) {
+                        c.publisher().publish(new ActionEvent.EditEventLabel(event.id()));
                     }
                     return new IdleToolState();
                 });
@@ -174,6 +178,7 @@ public final class RouteEditModeState extends BaseState {
                 case RECTANGLE -> new RectangleToolState();
                 case CONNECT -> new ConnectToolState();
                 case TEXT -> new TextToolState();
+                case EVENT -> new EventToolState();
                 case SELECT -> new IdleToolState();
             };
         });

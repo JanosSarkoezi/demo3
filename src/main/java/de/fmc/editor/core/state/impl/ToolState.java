@@ -39,6 +39,7 @@ public abstract class ToolState extends BaseState {
             case RECTANGLE -> self == ToolType.RECTANGLE ? this : new RectangleToolState();
             case CONNECT -> self == ToolType.CONNECT ? this : new ConnectToolState();
             case TEXT -> self == ToolType.TEXT ? this : new TextToolState();
+            case EVENT -> self == ToolType.EVENT ? this : new EventToolState();
             case SELECT -> self == ToolType.SELECT ? this : new IdleToolState();
         });
 
@@ -56,5 +57,8 @@ public abstract class ToolState extends BaseState {
         addRule(InputEvent.KeyPressed.class,
                 e -> e.code() == CustomKeyCode.KEY_T,
                 (e, c) -> self == ToolType.TEXT ? this : new TextToolState());
+        addRule(InputEvent.KeyPressed.class,
+                e -> e.code() == CustomKeyCode.KEY_E,
+                (e, c) -> self == ToolType.EVENT ? this : new EventToolState());
     }
 }

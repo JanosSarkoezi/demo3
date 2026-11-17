@@ -3,6 +3,7 @@ package de.fmc.editor.view;
 import de.fmc.editor.core.model.Circle;
 import de.fmc.editor.core.model.Connection;
 import de.fmc.editor.core.model.DiagramObject;
+import de.fmc.editor.core.model.Event;
 import de.fmc.editor.core.model.Rectangle;
 import de.fmc.editor.core.model.Text;
 import de.fmc.editor.core.model.Waypoint;
@@ -34,8 +35,8 @@ import java.util.UUID;
  */
 public class ConnectionViewMapper {
 
-    private static final double ARROW_SIZE = 12.0;    // Länge der Pfeilspitze
-    private static final double INDENT_RATIO = 0.65;  // Einkerbungstiefe hinten
+    private static final double ARROW_SIZE = ArrowShape.ARROW_SIZE;    // Länge der Pfeilspitze
+    private static final double INDENT_RATIO = ArrowShape.INDENT_RATIO;  // Einkerbungstiefe hinten
 
     private final DiagramQuery diagramQuery;
     private final Group connectionLayer;
@@ -127,14 +128,7 @@ public class ConnectionViewMapper {
         path.setStrokeWidth(1.0);
 
         // Pfeilspitze an (0,0) erzeugt, später per Layout + Rotate an die Zielkante transformiert
-        Polygon arrowHead = new Polygon();
-        double indentSize = ARROW_SIZE * INDENT_RATIO;
-        arrowHead.getPoints().addAll(
-                0.0, 0.0,                          // Spitze
-                -ARROW_SIZE, -ARROW_SIZE * 0.55,    // äußere Ecke links
-                -indentSize, 0.0,                   // Einkerbung (Mitte hinten)
-                -ARROW_SIZE, ARROW_SIZE * 0.55      // äußere Ecke rechts
-        );
+        Polygon arrowHead = ArrowShape.create();
         arrowHead.setFill(Color.BLACK);
         arrowHead.setStroke(Color.BLACK);
         arrowHead.setStrokeWidth(1.0);
@@ -184,14 +178,8 @@ public class ConnectionViewMapper {
         }
 
         // Pfeil an den Rand schieben und in Segmentrichtung rotieren
-        arrowHead.setLayoutX(intersection.getX());
-        arrowHead.setLayoutY(intersection.getY());
-        if (!arrowHead.getTransforms().isEmpty()
-                && arrowHead.getTransforms().get(0) instanceof Rotate rotate) {
-            rotate.setAngle(Math.toDegrees(angle));
-        } else {
-            arrowHead.getTransforms().setAll(new Rotate(Math.toDegrees(angle), 0, 0));
-        }
+        ArrowShape.orient(arrowHead, intersection.getX(), intersection.getY(),
+                Math.toDegrees(angle));
     }
 
     /**
@@ -244,8 +232,11 @@ public class ConnectionViewMapper {
             case Rectangle r -> r.width() / 2.0;
             case Text t -> t.width() / 2.0;
             case Circle c -> c.radius();
-            // Waypoints sind keine Verbindungsziele — als Quelle/Notfall: Punktnähe
+            // Waypoints sind keine Verbindungsziele — als Quelle/Notfall: Punktnähe.
             case Waypoint w -> 0.0;
+            // Events sind per ConnectionRule keine Verbindungsendpunkte —
+            // Punktnähe als defensiver Notfall.
+            case Event e -> 0.0;
         };
     }
 
@@ -255,6 +246,7 @@ public class ConnectionViewMapper {
             case Text t -> t.height() / 2.0;
             case Circle c -> c.radius();
             case Waypoint w -> 0.0;
+            case Event e -> 0.0;
         };
     }
 }

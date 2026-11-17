@@ -110,7 +110,8 @@ public class InputEventTranslator {
 
         publisher.publish(new InputEvent.MousePressed(
                 event.getX(), event.getY(),
-                mapButton(event.getButton()), event.getClickCount(), event.isControlDown()));
+                mapButton(event.getButton()), event.getClickCount(),
+                event.isControlDown(), event.isShiftDown()));
     }
 
     private void onMouseDragged(MouseEvent event) {
@@ -212,6 +213,7 @@ public class InputEventTranslator {
             case R -> CustomKeyCode.KEY_R;
             case C -> CustomKeyCode.KEY_C;
             case T -> CustomKeyCode.KEY_T;
+            case E -> CustomKeyCode.KEY_E;
             case ESCAPE -> CustomKeyCode.ESCAPE;
             case DELETE -> CustomKeyCode.DELETE;
             case SPACE -> CustomKeyCode.SPACE;

@@ -7,6 +7,7 @@ import de.fmc.editor.core.event.InputEvent;
 import de.fmc.editor.core.model.Circle;
 import de.fmc.editor.core.model.Connection;
 import de.fmc.editor.core.model.DiagramObject;
+import de.fmc.editor.core.model.Event;
 import de.fmc.editor.core.model.Rectangle;
 import de.fmc.editor.core.model.Text;
 import de.fmc.editor.core.model.Waypoint;
@@ -268,7 +269,15 @@ public class UndoService {
                     bus.publish(new ActionEvent.MoveObjectTo(move.id(), move.oldX(), move.oldY()));
                 }
             }
-            case ResizedObject resize -> bus.publish(resizeRequest(resize.previous()));
+            case ResizedObject resize -> {
+                // Event-Form umfasst SEITE UND Längen — zwei idempotente
+                // Requests (der Service dockt aus beidem die Spitze neu ab).
+                if (resize.previous() instanceof Event) {
+                    publishEventShape(resize.previous());
+                } else {
+                    bus.publish(resizeRequest(resize.previous()));
+                }
+            }
             case TextChanged text -> publishTextState(text.previous());
             case RemovedObjects removed -> bus.publish(
                     new ActionEvent.RestoreObjects(removed.objects(), removed.zIndices()));
@@ -290,7 +299,13 @@ public class UndoService {
                     bus.publish(new ActionEvent.MoveObjectTo(move.id(), move.newX(), move.newY()));
                 }
             }
-            case ResizedObject resize -> bus.publish(resizeRequest(resize.resized()));
+            case ResizedObject resize -> {
+                if (resize.resized() instanceof Event) {
+                    publishEventShape(resize.resized());
+                } else {
+                    bus.publish(resizeRequest(resize.resized()));
+                }
+            }
             case TextChanged text -> publishTextState(text.updated());
             case RemovedObjects removed -> bus.publish(new ActionEvent.DeleteObjects(
                     removed.objects().stream().map(DiagramObject::id).toList()));
@@ -301,11 +316,28 @@ public class UndoService {
         }
     }
 
+    /** Stellt einen Event-FORM-Zustand wieder her: Seite UND Längen — die
+     *  Andockposition dockt der Service daraus wieder ab (Ableitung, kein
+     *  Restore-Wert). Reihenfolge egal: beide Requests docken idempotent
+     *  neu ab. Die Label-Textbox stellt ihr EIGENER MoveObjectTo-Inverse
+     *  wieder her (die Geste hat den Move komponiert, nicht der Service —
+     *  genau deshalb bleibt das Undo hier rein mechanisch). */
+    private void publishEventShape(DiagramObject state) {
+        Event event = (Event) state;
+        bus.publish(new ActionEvent.SetEventSide(event.id(), event.side()));
+        bus.publish(new ActionEvent.ResizeEvent(
+                event.id(), event.horizontalExtent(), event.verticalRise()));
+    }
+
     private ActionEvent resizeRequest(DiagramObject target) {
         return switch (target) {
             case Circle c -> new ActionEvent.ResizeCircle(c.id(), c.radius());
             case Rectangle r -> new ActionEvent.ResizeBox(r.id(), r.width(), r.height());
             case Text t -> new ActionEvent.ResizeBox(t.id(), t.width(), t.height());
+            // Events: Form = die zwei Segmentlängen; die Spitze dockt der
+            // Service daraus wieder ans R ab (Ableitung, kein Restore-Wert).
+            case Event e -> new ActionEvent.ResizeEvent(
+                    e.id(), e.horizontalExtent(), e.verticalRise());
             // Waypoints haben keine Handles — der Service ignoriert das still.
             case Waypoint w -> new ActionEvent.ResizeBox(w.id(), 0.0, 0.0);
         };
@@ -336,6 +368,9 @@ public class UndoService {
             }
             // Waypoints tragen keinen Text.
             case Waypoint w -> { }
+            // Events tragen ebenfalls keinen Text mehr (23.11.): Das Label
+            // ist ein eigenes Text-Objekt und läuft über den Text-Fall.
+            case Event e -> { }
         }
     }
 }

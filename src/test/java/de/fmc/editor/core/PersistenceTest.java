@@ -4,6 +4,9 @@ import de.fmc.editor.core.event.ActionEvent;
 import de.fmc.editor.core.event.DiagramEvent;
 import de.fmc.editor.core.model.Circle;
 import de.fmc.editor.core.model.Connection;
+import de.fmc.editor.core.model.Event;
+import de.fmc.editor.core.model.EventDirection;
+import de.fmc.editor.core.model.EventSide;
 import de.fmc.editor.core.model.Rectangle;
 import de.fmc.editor.core.model.Text;
 import de.fmc.editor.core.model.TextAnchor;
@@ -14,6 +17,7 @@ import de.fmc.editor.core.persistence.PersistedLayers;
 import de.fmc.editor.core.persistence.PersistedObject;
 import de.fmc.editor.core.persistence.PersistedObjectType;
 import de.fmc.editor.core.persistence.PersistedDiagram;
+import de.fmc.editor.core.persistence.PersistedText;
 import de.fmc.editor.core.persistence.PersistenceService;
 import org.junit.jupiter.api.Test;
 
@@ -238,5 +242,159 @@ class PersistenceTest extends BusTestSupport {
         assertThatThrownBy(() -> PersistenceService.loadDiagram(
                 new StringReader("kein json")))
                 .isInstanceOf(RuntimeException.class);
+    }
+
+    @Test
+    void eventRoundTripPreservesOwnerSideShapeAndLabel() {
+        Rectangle rect = addRectangle(300.0, 400.0); // 40×30
+        bus.publish(new ActionEvent.CreateEvent(rect.id(), EventSide.LEFT,
+                EventDirection.INCOMING, "Bestellung", 140.0, 60.0));
+        Event event = diagram.allObjectsInZOrder().stream()
+                .filter(obj -> obj instanceof Event).map(obj -> (Event) obj)
+                .findFirst().orElseThrow();
+        // Gezogene Form (User-Formgriff) muss genauso überleben wie das Label.
+        bus.publish(new ActionEvent.ResizeEvent(event.id(), 66.0, 77.0));
+        closeGesture();
+        UUID labelId = diagram.findTextIdsOwnedBy(event.id()).getFirst();
+
+        // Export: Event als Objekt MIT Owner/Seite/Form-Längen (Label = null —
+        // es reist als eigener texts-Eintrag), Label im texts-Abschnitt.
+        PersistedDiagram dto = DiagramCodec.export(diagram);
+        PersistedObject eventDto = dto.objects().stream()
+                .filter(obj -> obj.type() == PersistedObjectType.EVENT)
+                .findFirst().orElseThrow();
+        assertThat(eventDto.ownerId()).isEqualTo(rect.id());
+        assertThat(eventDto.side()).isEqualTo("LEFT");
+        assertThat(eventDto.label()).isNull();
+        assertThat(eventDto.horizontalExtent()).isEqualTo(66.0);
+        assertThat(eventDto.verticalRise()).isEqualTo(77.0);
+        assertThat(dto.texts()).extracting(PersistedText::id).contains(labelId);
+        assertThat(dto.texts().stream()
+                .filter(t -> labelId.equals(t.id())).findFirst().orElseThrow()
+                .parentObjectId()).isEqualTo(event.id());
+
+        // Gson-Roundtrip über einen String und zurück auf den Bus.
+        StringWriter buffer = new StringWriter();
+        PersistenceService.saveDiagram(dto, buffer);
+        PersistedDiagram reloaded = PersistenceService.loadDiagram(
+                new StringReader(buffer.toString()));
+        load(DiagramCodec.toLoadRequest(reloaded));
+
+        // Alles wieder da: Owner, Seite, gezogene Form — und die Spitze frisch
+        // abgedockt (x = 300 - 40/4 = 290, y = Oberkante 385). Das Label ist
+        // als normaler owned Text mitgekommen.
+        Event loaded = (Event) diagram.findById(event.id()).orElseThrow();
+        assertThat(loaded.ownerId()).isEqualTo(rect.id());
+        assertThat(loaded.side()).isEqualTo(EventSide.LEFT);
+        assertThat(loaded.horizontalExtent()).isEqualTo(66.0);
+        assertThat(loaded.verticalRise()).isEqualTo(77.0);
+        assertThat(loaded.x()).isEqualTo(290.0);
+        assertThat(loaded.y()).isEqualTo(385.0);
+        Text label = (Text) diagram.findById(labelId).orElseThrow();
+        assertThat(label.ownerId()).isEqualTo(event.id());
+        assertThat(label.content()).isEqualTo("Bestellung");
+    }
+
+    @Test
+    void outgoingDirectionSurvivesRoundtripAndOldFilesDefaultIncoming() {
+        // OUTGOING-Event mit gezogener Form am selben R wie ein INCOMING.
+        Rectangle rect = addRectangle(300.0, 400.0); // 40×30
+        bus.publish(new ActionEvent.CreateEvent(rect.id(), EventSide.RIGHT,
+                EventDirection.OUTGOING, "Versand", 140.0, 60.0));
+        Event outgoing = diagram.allObjectsInZOrder().stream()
+                .filter(obj -> obj instanceof Event e && e.direction() == EventDirection.OUTGOING)
+                .map(obj -> (Event) obj).findFirst().orElseThrow();
+        bus.publish(new ActionEvent.ResizeEvent(outgoing.id(), 55.0, 66.0));
+        closeGesture();
+
+        PersistedDiagram dto = DiagramCodec.export(diagram);
+        PersistedObject eventDto = dto.objects().stream()
+                .filter(obj -> obj.type() == PersistedObjectType.EVENT)
+                .findFirst().orElseThrow();
+        assertThat(eventDto.direction()).isEqualTo("OUTGOING");
+
+        StringWriter buffer = new StringWriter();
+        PersistenceService.saveDiagram(dto, buffer);
+        load(DiagramCodec.toLoadRequest(PersistenceService.loadDiagram(
+                new StringReader(buffer.toString()))));
+
+        // Richtung, Seite, gezogene Form UND frisch abgedockter Fuß an der
+        // UNTERKANTE (x = 300 + 40/4 = 310, y = 400 + 15 = 415).
+        Event loaded = (Event) diagram.findById(outgoing.id()).orElseThrow();
+        assertThat(loaded.direction()).isEqualTo(EventDirection.OUTGOING);
+        assertThat(loaded.side()).isEqualTo(EventSide.RIGHT);
+        assertThat(loaded.horizontalExtent()).isEqualTo(55.0);
+        assertThat(loaded.verticalRise()).isEqualTo(66.0);
+        assertThat(loaded.x()).isEqualTo(310.0);
+        assertThat(loaded.y()).isEqualTo(415.0);
+
+        // Alte Dateien OHNE direction-Feld laden still als INCOMING
+        // (26.11. war die Richtung per Definition hereinkommend).
+        load(DiagramCodec.toLoadRequest(PersistenceService.loadDiagram(new StringReader("""
+                {"objects": [
+                  {"id":"cccccccc-0000-0000-0000-000000000001","type":"RECTANGLE","x":100.0,"y":100.0,"width":40.0,"height":30.0},
+                  {"id":"cccccccc-0000-0000-0000-000000000002","type":"EVENT","ownerId":"cccccccc-0000-0000-0000-000000000001","side":"RIGHT","direction":"UNSINN"}
+                ]}
+                """))));
+        Event legacy = (Event) diagram
+                .findById(UUID.fromString("cccccccc-0000-0000-0000-000000000002"))
+                .orElseThrow();
+        assertThat(legacy.direction()).isEqualTo(EventDirection.INCOMING);
+    }
+
+    @Test
+    void legacyEventLabelMigratesToOwnedText() {
+        // Dateiformat vom 17.11.: Das Label steckte noch IM Event-Record.
+        // Der Codec migriert es still zum owned Text am abgeleiteten Anker
+        // (Kette R → E → Text). R: 100/100, 40×30 -> Start links = (60-40,
+        // 85-40) = (20, 45), Anker = (20, 35).
+        load(DiagramCodec.toLoadRequest(PersistenceService.loadDiagram(new StringReader("""
+                {"objects": [
+                  {"id":"cccccccc-0000-0000-0000-000000000001","type":"RECTANGLE","x":100.0,"y":100.0,"width":40.0,"height":30.0},
+                  {"id":"cccccccc-0000-0000-0000-000000000002","type":"EVENT","ownerId":"cccccccc-0000-0000-0000-000000000001","label":"Bestellung","side":"LEFT","horizontalExtent":50.0,"verticalRise":44.0}
+                ]}
+                """))));
+        assertThat(diagram.allObjectsInZOrder()).hasSize(3); // R + Event + migriertes Label
+
+        Event event = (Event) diagram
+                .findById(UUID.fromString("cccccccc-0000-0000-0000-000000000002"))
+                .orElseThrow();
+        assertThat(event.side()).isEqualTo(EventSide.LEFT);
+        assertThat(event.horizontalExtent()).isEqualTo(50.0);
+
+        List<UUID> owned = diagram.findTextIdsOwnedBy(event.id());
+        assertThat(owned).hasSize(1);
+        Text migrated = (Text) diagram.findById(owned.getFirst()).orElseThrow();
+        assertThat(migrated.content()).isEqualTo("Bestellung");
+        // Anker abgeleitet aus Owner + Seite + Form: Start = Seitenrand 80 -
+        // 50 = 30 auf Höhe 85 - 44 = 41; Anker = (30, 41 - 10).
+        assertThat(migrated.x()).isEqualTo(30.0);
+        assertThat(migrated.y()).isEqualTo(31.0);
+    }
+
+    @Test
+    void eventToleratesMissingFieldsAndDefects() {
+        // Fehlende Seite/Form-Längen -> demo3-Defaults (RIGHT, 40/40);
+        // fehlender Owner macht den Eintrag DEFECT (still übersprungen);
+        // fehlendes label -> keine Migration (kein Text).
+        load(DiagramCodec.toLoadRequest(PersistenceService.loadDiagram(new StringReader("""
+                {"objects": [
+                  {"id":"dddddddd-0000-0000-0000-000000000001","type":"RECTANGLE","x":100.0,"y":100.0,"width":40.0,"height":30.0},
+                  {"id":"dddddddd-0000-0000-0000-000000000002","type":"EVENT","ownerId":"dddddddd-0000-0000-0000-000000000001","side":"QUATSCH"},
+                  {"id":"dddddddd-0000-0000-0000-000000000003","type":"EVENT","label":"Waisenkind"}
+                ]}
+                """))));
+        assertThat(diagram.allObjectsInZOrder()).hasSize(2); // R + 1 Event
+
+        Event loaded = (Event) diagram
+                .findById(UUID.fromString("dddddddd-0000-0000-0000-000000000002"))
+                .orElseThrow();
+        assertThat(loaded.side()).isEqualTo(EventSide.RIGHT); // ungültig -> Standard
+        assertThat(loaded.horizontalExtent()).isEqualTo(40.0); // fehlend -> Default
+        assertThat(loaded.verticalRise()).isEqualTo(40.0);
+        assertThat(diagram.findTextIdsOwnedBy(loaded.id())).isEmpty(); // kein label-Feld
+        // Ohne Owner kein Event (Defekt übersprungen, kein Crash).
+        assertThat(diagram.findById(UUID.fromString("dddddddd-0000-0000-0000-000000000003")))
+                .isEmpty();
     }
 }

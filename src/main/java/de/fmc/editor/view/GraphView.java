@@ -7,10 +7,13 @@ import de.fmc.editor.core.model.Circle;
 import de.fmc.editor.core.model.Connection;
 import de.fmc.editor.core.model.DiagramObject;
 import de.fmc.editor.core.model.DiagramQuery;
+import de.fmc.editor.core.model.Event;
+import de.fmc.editor.core.model.EventGeometry;
 import de.fmc.editor.core.model.HandlePositions;
 import de.fmc.editor.core.model.Rectangle;
 import de.fmc.editor.core.model.Text;
 import de.fmc.editor.core.model.Waypoint;
+import de.fmc.editor.core.model.ToolType;
 import de.fmc.editor.core.state.CameraInfo;
 import javafx.event.EventHandler;
 import javafx.geometry.VPos;
@@ -52,6 +55,11 @@ import java.util.UUID;
  * camera.screenToWorldX/Y.
  */
 public class GraphView {
+
+    /** Verifikations-Schalter des Regressionstests (EventOwnerRefreshTest
+     *  dreht ihn kurzzeitig auf false und beweist damit, dass der Test den
+     *  „Pfeil klebt nach Undo"-Bug tatsächlich fängt). Immer true. */
+    static boolean REFRESH_OWNER_DERIVED_NODES = true;
 
     // --- Stil-Konstanten (aus demo2 portiert) ---
     private static final double STROKE_WIDTH = 1.5;
@@ -125,6 +133,14 @@ public class GraphView {
     private UUID resizeModeTarget;
     private final Group handleGroup = new Group();
 
+    // --- Event-Formgriffe (nur im Event-Werkzeug sichtbar, 17.11.) ---
+    private static final double EVENT_HANDLE_SIZE = 8.0;
+    private final Group eventHandleGroup = new Group();
+    /** Formgriffe zeigen, solange das Event-Werkzeug aktiv ist (ToolChanged-
+     *  getrieben — dasselbe Muster wie die W-Sichtbarkeit im RouteEditMode:
+     *  Der Zustand IST das Flag, kein separater Sitzungsspeicher). */
+    private boolean eventToolActive = false;
+
     /** Objekt-ID der aktiven Resize-Live-Vorschau; null = keine Vorschau. */
     private UUID resizePreviewId;
 
@@ -187,6 +203,14 @@ public class GraphView {
         root.getChildren().remove(node);
     }
 
+    /** Modell-Node eines Objekts — package-private für die headlessen
+     *  Regressionstests im selben Paket (EventOwnerRefreshTest prüft die
+     *  Geometrie der Event-Pfade nach Move/Undo, ohne private Interna
+     *  reflektieren zu müssen). */
+    Group objectNode(UUID id) {
+        return objectNodes.get(id);
+    }
+
     /** Sichtbarkeit des Waypoint-Layers — wird ausschließlich vom
      *  {@link ActionEvent.WaypointFocusChanged}-Hinweis des Kerns getrieben
      *  (RouteEditMode betreten/verlassen); die Toolbar-Checkbox ist entfallen.
@@ -239,7 +263,7 @@ public class GraphView {
         previewPath.setMouseTransparent(true);
         previewPath.setVisible(false);
         previewWaypointGroup.setMouseTransparent(true);
-        uiLayer.getChildren().addAll(handleGroup, previewWaypointGroup, previewPath);
+        uiLayer.getChildren().addAll(handleGroup, eventHandleGroup, previewWaypointGroup, previewPath);
 
         // Gummiband-Rechteck im BILDSCHIRM-Raum des Root (nicht im skalierten
         // worldGroup): Der Hinweis trägt Screen-Koordinaten, das Band ist
@@ -296,6 +320,11 @@ public class GraphView {
         // aus dem Kern (Pan/Move greifen zu — in der View sonst nicht sichtbar).
         bus.subscribe(ActionEvent.ToolChanged.class, e -> {
             cursorPresenter.setTool(e.tool());
+            // Event-Formgriffe: sichtbar nur im Event-Werkzeug (der Kern
+            // greift sie über EventGeometry — die Marker zeigen exakt die
+            // Greif-Fläche).
+            eventToolActive = e.tool() == ToolType.EVENT;
+            refreshEventHandles();
             updateCursor();
         });
         bus.subscribe(ActionEvent.CursorChanged.class, e -> {
@@ -347,6 +376,10 @@ public class GraphView {
         }
 
         applyStyle(object.id());
+
+        // Formgriffe im Event-Werkzeug aktuell halten (neues Event oder
+        // Restore) — die Griffe sind reine Präsentation des Modellstands.
+        refreshEventHandles();
 
         // Ein erscheinendes Objekt kann Referenz einer (restaurierten)
         // Verbindung sein — deren Pfad muss neu abgeleitet werden. Kritisch
@@ -415,6 +448,10 @@ public class GraphView {
                 shape.setStrokeWidth(1.0);
                 node.getChildren().add(shape);
             }
+            // Event: Kind 0 = Path (Haupt-Shape für Stroke/Glow), Kind 1 =
+            // Pfeilspitze, Kind 2 = Label — Aufbau und Geometrie-Update im
+            // EventRenderer (eine Wahrheit, die View bleibt stumm).
+            case Event e -> EventRenderer.buildNode(node);
         }
     }
 
@@ -465,6 +502,14 @@ public class GraphView {
                 shape.setCenterX(w.x());
                 shape.setCenterY(w.y());
             }
+            // Event: Geometrie komplett aus EventGeometry (Kern rechnet,
+            // View rendert). Fehlender Owner = Kaskaden-Fenster: Der Node
+            // bleibt auf dem letzten Stand, das Remove-Fakt folgt sowieso.
+            case Event e -> {
+                if (diagramQuery.findById(e.ownerId()).orElse(null) instanceof Rectangle owner) {
+                    EventRenderer.updateNode(node, e, owner);
+                }
+            }
         }
     }
 
@@ -477,6 +522,7 @@ public class GraphView {
         if (hoveredId != null && hoveredId.equals(id)) {
             hoveredId = null;
         }
+        refreshEventHandles();
     }
 
     // ---------------------------------------------------------------------
@@ -491,6 +537,18 @@ public class GraphView {
                     updateObjectNode(node, obj);
                 }
                 refreshConnectionsTouching(moved.id());
+                // Owner-derivierter Refresh (23.11., Bugfix „Pfeil klebt nach
+                // Undo des R-Moves"): Event-Pfeile zeichnen ihre Geometrie
+                // aus dem OWNER ab — bewegt sich das R (Drag-Segment, Undo-/
+                // Redo-Restore, jede Bus-Quelle), müssen ihre Nodes sofort
+                // mitfrischt werden. Beim Undo läuft die inverse Wiedergabe
+                // RÜCKWÄRTS: Der eigene Move-Entry des Events zeichnet noch
+                // gegen den ALTEN Owner-Stand; erst der Owner-Restore hier
+                // konvergiert die View. (Der Resize-Pfad hat diesen Hook
+                // bereits — onObjectResized.)
+                if (obj instanceof Rectangle rect && REFRESH_OWNER_DERIVED_NODES) {
+                    refreshEventNodesAgainst(rect);
+                }
             });
         }
         // Laufende Griffe mitziehen, falls das Resize-Target verschoben wurde.
@@ -498,6 +556,7 @@ public class GraphView {
                 && movedObjects.stream().anyMatch(m -> m.id().equals(resizeModeTarget))) {
             refreshHandles();
         }
+        refreshEventHandles();
     }
 
     private void onObjectResized(DiagramEvent.ObjectResized event) {
@@ -509,6 +568,12 @@ public class GraphView {
         if (event.resized().id().equals(resizeModeTarget)) {
             refreshHandles();
         }
+        // R-Resize = Event-Re-Dock (Service publiziert die Moves im selben
+        // Gesten-Eintrag) — die Formgriffe folgen der neuen Andock-Geometrie.
+        if (event.resized() instanceof Rectangle) {
+            restoreEventNodesOwnedBy(event.resized().id());
+        }
+        refreshEventHandles();
     }
 
     private void onObjectTextChanged(DiagramObject updated) {
@@ -517,6 +582,12 @@ public class GraphView {
             // Trägt auch neue Position (verankerte Texte gleiten) und Box.
             updateObjectNode(node, updated);
             applyStyle(updated.id());
+        }
+        // Event-Label-Änderung: Der Text ändert die Hit-Box — die Marker
+        // bleiben davon unberührt, aber der Refresh ist billig und hält die
+        // Reihenfolge der Griff-Paare stabil (z-Ordnung der Events).
+        if (updated instanceof Event) {
+            refreshEventHandles();
         }
     }
 
@@ -561,6 +632,7 @@ public class GraphView {
         resizeModeTarget = null;
         resizePreviewId = null;
         handleGroup.getChildren().clear();
+        eventHandleGroup.getChildren().clear();
 
         // Cursor-Sitzungszustand des alten Dokuments entsorgen (das Tool
         // folgt gleich über SelectTool(SELECT) → ToolChanged; defensiv auch
@@ -909,6 +981,79 @@ public class GraphView {
     }
 
     // ---------------------------------------------------------------------
+    // Event-Formgriffe (Event-Werkzeug)
+    // ---------------------------------------------------------------------
+
+    /** Formgriffe aller Events neu zeichnen — aus dem Modell. Nur aktiv im
+     *  Event-Werkzeug (ToolChanged-getrieben); sonst leer. */
+    private void refreshEventHandles() {
+        eventHandleGroup.getChildren().clear();
+        if (!eventToolActive) {
+            return;
+        }
+        for (DiagramObject obj : diagramQuery.allObjectsInZOrder()) {
+            if (obj instanceof Event event) {
+                drawEventHandleMarkers(event);
+            }
+        }
+    }
+
+    /** Zwei Formgriff-Marker (Start + Knick) eines Events — Positionen aus
+     *  EventGeometry (Kern-Geometrie; der Marker zeigt exakt die Fläche, die
+     *  der EventToolState greift). */
+    private void drawEventHandleMarkers(Event event) {
+        if (!(diagramQuery.findById(event.ownerId()).orElse(null) instanceof Rectangle owner)) {
+            return; // Kaskaden-Fenster: ohne Owner keine Geometrie
+        }
+        double[] start = EventGeometry.end(owner, event.side(), event.direction(),
+                event.horizontalExtent(), event.verticalRise());
+        double[] kink = EventGeometry.kink(owner, event.side(), event.direction(),
+                event.verticalRise());
+        eventHandleGroup.getChildren().addAll(
+                eventHandleMarker(start[0], start[1]),
+                eventHandleMarker(kink[0], kink[1]));
+    }
+
+    /** Einzelner Griff-Marker — Stil wie die Resize-Griffe (schwarz mit
+     *  weißem Rand), nur kleiner. mouseTransparent: Griff-Drags laufen über
+     *  den Kern, nicht über Nodes. */
+    private javafx.scene.shape.Rectangle eventHandleMarker(double x, double y) {
+        javafx.scene.shape.Rectangle handle = new javafx.scene.shape.Rectangle(
+                x - EVENT_HANDLE_SIZE / 2, y - EVENT_HANDLE_SIZE / 2,
+                EVENT_HANDLE_SIZE, EVENT_HANDLE_SIZE);
+        handle.setFill(Color.BLACK);
+        handle.setStroke(Color.WHITE);
+        handle.setStrokeWidth(1.0);
+        handle.setStrokeType(StrokeType.INSIDE);
+        handle.setMouseTransparent(true);
+        return handle;
+    }
+
+    /** Event-Symbole eines Owners gegen eine R-PREVIEW-Geometrie zeichnen:
+     *  Die Spitze klebt am gezogenen Rand, bevor das Modell committet
+     *  (derselbe Klebe-Effekt wie die Verbindungspfeile). */
+    private void refreshEventNodesAgainst(Rectangle previewOwner) {
+        for (DiagramObject obj : diagramQuery.allObjectsInZOrder()) {
+            if (obj instanceof Event event && previewOwner.id().equals(event.ownerId())) {
+                Group node = objectNodes.get(event.id());
+                if (node != null) {
+                    EventRenderer.updateNode(node, event, previewOwner);
+                }
+            }
+        }
+    }
+
+    /** Event-Symbole eines Owners aus dem MODELL herstellen — nach dem
+     *  Commit idempotent (der ObjectResized/ObjectsMoved-Fakt hat längst
+     *  gesetzt), nach dem ESC-Abbruch der zwingende Restore. */
+    private void restoreEventNodesOwnedBy(UUID ownerId) {
+        diagramQuery.findById(ownerId)
+                .filter(Rectangle.class::isInstance)
+                .map(Rectangle.class::cast)
+                .ifPresent(this::refreshEventNodesAgainst);
+    }
+
+    // ---------------------------------------------------------------------
     // Resize-Griffe ( ResizeModeChanged)
     // ---------------------------------------------------------------------
 
@@ -967,7 +1112,10 @@ public class GraphView {
                 // das Modell hat sich nie geändert, die Pfeile dürfen nicht an
                 // der letzten Vorschau-Kante kleben bleiben.
                 refreshConnectionsTouching(resizePreviewId);
+                // Dasselbe für die Event-Symbole des gepreviewten R.
+                restoreEventNodesOwnedBy(resizePreviewId);
                 refreshHandles();
+                refreshEventHandles();
                 resizePreviewId = null;
                 // Geste beendet: Cursor neu auflösen (während des Drags
                 // klebte der richtungsabhängige Cursor — kein MOUSE_MOVED
@@ -980,6 +1128,18 @@ public class GraphView {
         Group node = objectNodes.get(event.preview().id());
         if (node != null) {
             updateObjectNode(node, event.preview());
+        }
+        if (event.preview() instanceof Event previewEvent) {
+            // Event-Form-Drag: Nur die zwei Formgriffe folgen der Preview-
+            // Geometrie (Marker und Form laufen nie auseinander) — keine
+            // Resize-Griffe, keine Verbindungs-Refreshs.
+            eventHandleGroup.getChildren().clear();
+            if (eventToolActive) {
+                drawEventHandleMarkers(previewEvent);
+            }
+            return;
+        }
+        if (node != null) {
             handleGroup.getChildren().clear();
             drawHandles(event.preview());
         }
@@ -988,5 +1148,10 @@ public class GraphView {
         // Verhalten über Live-Registry-Mutation pro Drag-Segment — bewusst
         // nicht kopiert, der Hinweis ist der demo3-Weg).
         refreshConnectionsTouching(event.preview(), event.preview().id());
+        // Event-Symbole des R docken ebenfalls live an der Preview-Kante ab
+        // (Spitzen-Kleben, 17.11.) — Modell-Fakten (Re-Dock) erst beim Commit.
+        if (event.preview() instanceof Rectangle previewRect) {
+            refreshEventNodesAgainst(previewRect);
+        }
     }
 }

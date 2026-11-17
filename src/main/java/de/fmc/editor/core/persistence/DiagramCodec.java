@@ -5,6 +5,10 @@ import de.fmc.editor.core.model.Circle;
 import de.fmc.editor.core.model.Connection;
 import de.fmc.editor.core.model.DiagramObject;
 import de.fmc.editor.core.model.DiagramQuery;
+import de.fmc.editor.core.model.Event;
+import de.fmc.editor.core.model.EventDirection;
+import de.fmc.editor.core.model.EventGeometry;
+import de.fmc.editor.core.model.EventSide;
 import de.fmc.editor.core.model.Rectangle;
 import de.fmc.editor.core.model.Text;
 import de.fmc.editor.core.model.Waypoint;
@@ -59,13 +63,24 @@ public final class DiagramCodec {
             switch (obj) {
                 case Circle c -> objects.add(new PersistedObject(c.id(), PersistedObjectType.CIRCLE,
                         c.x(), c.y(), c.radius() * 2.0, c.radius() * 2.0, c.layerId(),
-                        c.label(), null, null));
+                        c.label(), null, null, null, null, null, null, null));
                 case Rectangle r -> objects.add(new PersistedObject(r.id(), PersistedObjectType.RECTANGLE,
                         r.x(), r.y(), r.width(), r.height(), r.layerId(),
-                        null, r.content(), r.centered()));
+                        null, r.content(), r.centered(), null, null, null, null, null));
                 case Waypoint w -> objects.add(new PersistedObject(w.id(), PersistedObjectType.WAYPOINT,
                         w.x(), w.y(), WAYPOINT_BOX_SIZE, WAYPOINT_BOX_SIZE, w.layerId(),
-                        null, null, null));
+                        null, null, null, null, null, null, null, null));
+                // Events: Maße irrelevant (Geometrie abgeleitet) — gespeichert
+                // werden Owner, Seite, RICHTUNG und die zwei Form-Längen; die
+                // Andock-Position läuft als abgeleiteter Wert mit und wird
+                // beim Laden neu abgeleitet. Das Label ist seit 23.11. ein
+                // eigenes Text-Objekt und reist im texts-Abschnitt; das
+                // label-Feld des EVENT-Typs bleibt MIGRATIONS-Eingabe für
+                // Dateien vom 17.11. (siehe Import).
+                case Event e -> objects.add(new PersistedObject(e.id(), PersistedObjectType.EVENT,
+                        e.x(), e.y(), 0.0, 0.0, e.layerId(),
+                        null, null, null, e.ownerId(), e.side().name(),
+                        e.horizontalExtent(), e.verticalRise(), e.direction().name()));
                 case Text t -> texts.add(new PersistedText(t.id(), t.content(), t.x(), t.y(),
                         t.width(), t.height(), t.anchor(), t.ownerId(), t.layerId()));
             }
@@ -86,20 +101,50 @@ public final class DiagramCodec {
      *  Bus — der DiagramService bestätigt mit EINEM DiagramReset-Fakt. */
     public static ActionEvent.LoadDiagram toLoadRequest(PersistedDiagram data) {
         List<DiagramObject> objects = new ArrayList<>();
+        List<Text> migratedEventLabels = new ArrayList<>();
         for (PersistedObject dto : data.objects()) {
             if (dto == null || dto.id() == null || dto.type() == null) {
                 continue; // Defekten Eintrag still überspringen — kein Crash
             }
-            DiagramObject mapped = switch (dto.type()) {
-                case CIRCLE -> new Circle(dto.id(), dto.x(), dto.y(), circleRadius(dto),
-                        dto.label(), layerId(dto.layerId()));
-                case RECTANGLE -> new Rectangle(dto.id(), dto.x(), dto.y(), dto.width(), dto.height(),
+            switch (dto.type()) {
+                case CIRCLE -> objects.add(new Circle(dto.id(), dto.x(), dto.y(), circleRadius(dto),
+                        dto.label(), layerId(dto.layerId())));
+                case RECTANGLE -> objects.add(new Rectangle(dto.id(), dto.x(), dto.y(), dto.width(), dto.height(),
                         dto.content(), dto.centered() == null || dto.centered(),
-                        layerId(dto.layerId()));
-                case WAYPOINT -> new Waypoint(dto.id(), dto.x(), dto.y(), layerId(dto.layerId()));
-            };
-            objects.add(mapped);
+                        layerId(dto.layerId())));
+                case WAYPOINT -> objects.add(new Waypoint(dto.id(), dto.x(), dto.y(), layerId(dto.layerId())));
+                // Event ohne Owner ist defekt (still übersprungen); Seite
+                // ungültig/fehlend -> RIGHT (Standard); Richtung
+                // fehlend/ungültig -> INCOMING (Dateien vor dem 26.11.);
+                // Form-Längen fehlend/ungültig -> 40/40 (demo3-Defaults).
+                // x/y läuft mit — der DiagramService dockt die Andock-
+                // position beim Laden frisch ab.
+                case EVENT -> {
+                    if (dto.ownerId() == null) {
+                        continue;
+                    }
+                    EventSide side = tolerantSide(dto.side());
+                    EventDirection direction = tolerantDirection(dto.direction());
+                    double extent = tolerantExtent(dto.horizontalExtent());
+                    double rise = tolerantExtent(dto.verticalRise());
+                    objects.add(new Event(dto.id(), dto.ownerId(), side, direction,
+                            extent, rise, dto.x(), dto.y(), layerId(dto.layerId())));
+                    // MIGRATION (23.11.): Dateien vom 17.11. trugen das
+                    // Label noch im Event-Record — es wird zum owned Text
+                    // am Event (Kette R → E → Text), positioniert am
+                    // abgeleiteten EventGeometry-Anker des alten Symbols.
+                    if (dto.label() != null && !dto.label().isBlank()) {
+                        double[] anchor = migratedAnchor(data, dto, side, extent, rise);
+                        migratedEventLabels.add(new Text(UUID.randomUUID(), dto.label(),
+                                anchor[0], anchor[1],
+                                EventGeometry.LABEL_DEFAULT_BOX_WIDTH,
+                                EventGeometry.LABEL_DEFAULT_BOX_HEIGHT,
+                                null, dto.id(), layerId(dto.layerId())));
+                    }
+                }
+            }
         }
+        objects.addAll(migratedEventLabels);
         for (PersistedText dto : data.texts()) {
             if (dto == null || dto.id() == null) {
                 continue;
@@ -129,5 +174,42 @@ public final class DiagramCodec {
      *  der Standard-Ebene — das Modell hält nie null als Ebene. */
     private static UUID layerId(UUID layerId) {
         return layerId != null ? layerId : PersistedLayers.STANDARD_LAYER_ID;
+    }
+
+    /** Seitenlage tolerant gelesen: unbekannt/fehlend -> RIGHT (Standard). */
+    private static EventSide tolerantSide(String side) {
+        return "LEFT".equalsIgnoreCase(side) ? EventSide.LEFT : EventSide.RIGHT;
+    }
+
+    /** Richtung tolerant gelesen: unbekannt/fehlend -> INCOMING (Dateien
+     *  vor dem 26.11. kannten nur hereinkommende Events). */
+    private static EventDirection tolerantDirection(String direction) {
+        return "OUTGOING".equalsIgnoreCase(direction)
+                ? EventDirection.OUTGOING : EventDirection.INCOMING;
+    }
+
+    /** Form-Länge tolerant gelesen: fehlend/ungültig -> demo3-Default 40. */
+    private static double tolerantExtent(Double extent) {
+        return extent != null && Double.isFinite(extent) && extent > 0.0
+                ? extent
+                : EventGeometry.DEFAULT_EXTENT;
+    }
+
+    /** Anker eines migrierten Event-Labels: abgeleitet aus Owner-DTO +
+     *  Seite + Form-Längen über EventGeometry (Kern-Geometrie, derselbe
+     *  Anker wie bei der Live-Erstellung). Fehlt das Owner-DTO in der
+     *  Datei, sitzt das Label versatzweise über der gespeicherten Spitze. */
+    private static double[] migratedAnchor(PersistedDiagram data, PersistedObject eventDto,
+                                           EventSide side, double extent, double rise) {
+        for (PersistedObject dto : data.objects()) {
+            if (dto != null && dto.type() == PersistedObjectType.RECTANGLE
+                    && eventDto.ownerId().equals(dto.id())) {
+                Rectangle owner = new Rectangle(dto.id(), dto.x(), dto.y(),
+                        dto.width(), dto.height(), layerId(dto.layerId()));
+                return EventGeometry.labelAnchor(owner, side, EventDirection.INCOMING,
+                        extent, rise);
+            }
+        }
+        return new double[]{eventDto.x(), eventDto.y() - EventGeometry.LABEL_HEIGHT};
     }
 }

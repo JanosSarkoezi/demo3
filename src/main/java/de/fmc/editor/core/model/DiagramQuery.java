@@ -21,10 +21,20 @@ public interface DiagramQuery {
     }
 
     /**
-     * IDs aller Text-Objekte mit diesem Owner (K/R-Objekt oder Connection),
-     * in z-Ordnung. Default: leer — Stubs bleiben stumm.
+     * IDs aller Text-Objekte mit diesem Owner (K/R-Objekt, Connection oder
+     * Event — Kette R → E → Text), in z-Ordnung. Default: leer — Stubs
+     * bleiben stumm.
      */
     default List<UUID> findTextIdsOwnedBy(UUID ownerId) {
+        return List.of();
+    }
+
+    /**
+     * IDs aller Events mit diesem Owner-R, in z-Ordnung (Kardinalität 0..1
+     * erzwingt das Werkzeug; das Modell bleibt permissiv, deshalb eine
+     * Liste). Default: leer — Stubs bleiben stumm.
+     */
+    default List<UUID> findEventIdsOwnedBy(UUID ownerId) {
         return List.of();
     }
 
